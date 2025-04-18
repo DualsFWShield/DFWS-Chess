@@ -10,11 +10,32 @@ DFWS Chess est un jeu d'échecs premium avec thème clair/sombre, développé av
 
 ## Aperçu
 
-![Menu principal](assets/Mode-selection.png)
+![Menu principal](assets/Mode-selection.jpeg)
 *Menu principal du jeu DFWS Chess*
 
-![Échiquier](assets/board.png)
+![Échiquier](assets/board.jpeg)
 *Échiquier avec interface moderne et animations fluides*
+
+![Choix IA](assets/AI-choice.jpeg)
+*Sélection du niveau de l'IA*
+
+![Plateau d'analyse](assets/Analisis-board.jpeg)
+*Échiquier en mode analyse*
+
+![Ancien échiquier](assets/board.jpeg)
+*Ancienne version de l'échiquier*
+
+![Ancien menu principal](assets/Mode-selection.jpeg)
+*Ancienne version du menu principal*
+
+![Options](assets/Options.jpeg)
+*Menu des options*
+
+![Temps](assets/Time.jpeg)
+*Affichage des minuteries*
+
+![Menu Fin de partie](assets/Win-lose-menu.jpeg)
+*Menu affiché en fin de partie*
 
 ## Fonctionnalités
 
