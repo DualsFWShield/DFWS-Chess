@@ -511,33 +511,30 @@ function updateBoardOverlays() {
     // Filter: Mate Sequence (from current position's analysis)
     if (filterMatEl?.checked && currentAnalysis?.eval_before && typeof currentAnalysis.eval_before === 'string' && currentAnalysis.eval_before.startsWith('M')) {
         const mateIn = parseInt(currentAnalysis.eval_before.substring(1));
-        // Check if the mate is for the player whose turn it is
-        const isMateForCurrentPlayer = (reviewGame.turn() === 'w' && mateIn > 0) || (reviewGame.turn() === 'b' && mateIn < 0);
+        if (!isNaN(mateIn)) { // Ensure mateIn is a valid number
+            const isMateForCurrentPlayer = (reviewGame.turn() === 'w' && mateIn > 0) || (reviewGame.turn() === 'b' && mateIn < 0);
 
-        // Only draw if it's a mate for the current player, within reasonable length, and PV exists
-        if (isMateForCurrentPlayer && Math.abs(mateIn) <= ARROW_COLORS.mate.length && currentAnalysis.pv && currentAnalysis.pv.length >= Math.abs(mateIn)) {
-            // Use a temporary board based on the *current* reviewGame state
-            const tempGameMate = new Chess(reviewGame.fen());
-            for (let i = 0; i < Math.abs(mateIn); i++) {
-                const uciMove = currentAnalysis.pv[i];
-                const from = uciMove.substring(0, 2);
-                const to = uciMove.substring(2, 4);
-                 // Validate coordinates before attempting move/draw
-                if (!algToPixel(from) || !algToPixel(to)) {
-                    console.warn(`Skipping Mate arrow ${i}: Invalid coords ${from}->${to}`);
-                    break; // Stop drawing sequence if coords are bad
-                }
-                // Attempt the move on the temporary board
-                const moveResult = tempGameMate.move(uciMove, { sloppy: true });
-                if (moveResult) {
-                    // Draw arrow only if the move was legal on the temp board
-                    const colorIndex = Math.min(i, ARROW_COLORS.mate.length - 1);
-                    const thicknessIndex = Math.min(i, ARROW_THICKNESS.mate.length - 1);
-                    drawArrowWithNumber(from, to, ARROW_COLORS.mate[colorIndex], `mate-${i}`, ARROW_THICKNESS.mate[thicknessIndex], i + 1);
-                } else {
-                    // Stop drawing sequence if an illegal move is encountered
-                    console.warn(`Mate sequence drawing stopped: Invalid move ${uciMove} at step ${i} from FEN ${reviewGame.fen()}`);
-                    break;
+            if (isMateForCurrentPlayer && Math.abs(mateIn) <= ARROW_COLORS.mate.length && currentAnalysis.pv && currentAnalysis.pv.length >= Math.abs(mateIn)) {
+                const tempGameMate = new Chess(reviewGame.fen());
+                for (let i = 0; i < Math.abs(mateIn); i++) {
+                    const uciMove = currentAnalysis.pv[i];
+                    const from = uciMove.substring(0, 2);
+                    const to = uciMove.substring(2, 4);
+
+                    if (!algToPixel(from) || !algToPixel(to)) {
+                        console.warn(`Skipping Mate arrow ${i}: Invalid coords ${from}->${to}`);
+                        break;
+                    }
+
+                    const moveResult = tempGameMate.move(uciMove, { sloppy: true });
+                    if (moveResult) {
+                        const colorIndex = Math.min(i, ARROW_COLORS.mate.length - 1);
+                        const thicknessIndex = Math.min(i, ARROW_THICKNESS.mate.length - 1);
+                        drawArrowWithNumber(from, to, ARROW_COLORS.mate[colorIndex], `mate-${i}`, ARROW_THICKNESS.mate[thicknessIndex], i + 1);
+                    } else {
+                        console.warn(`Mate sequence drawing stopped: Invalid move ${uciMove} at step ${i} from FEN ${reviewGame.fen()}`);
+                        break;
+                    }
                 }
             }
         }

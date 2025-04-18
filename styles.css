@@ -339,6 +339,18 @@ h1 {
     left: 125%;
 }
 
+/* Style for SVG icons in time selection menu */
+.time-button svg {
+    width: 35px;
+    height: 35px;
+    fill: var(--primary-color); /* Match the color of fas icons */
+    transition: fill 0.3s ease; /* Smooth color transition */
+}
+
+.time-button:hover svg {
+    fill: white; /* Match hover effect of fas icons */
+}
+
 /* Difficulty Selection */
 .difficulty-options {
     display: flex;
@@ -1595,5 +1607,178 @@ body.light-theme .chat-bubble {
         width: 50px;
         height: 50px;
         font-size: 2em;
+    }
+}
+
+/* Custom Time Modal (coherent with main modal styles) */
+#custom-time-modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+#custom-time-modal.show {
+    display: flex;
+    opacity: 1;
+    pointer-events: auto;
+}
+#custom-time-modal .modal-content {
+    background: var(--surface-color);
+    padding: 25px;
+    border-radius: var(--border-radius);
+    width: 90%;
+    max-width: 450px;
+    text-align: center;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+    transform: scale(0.95);
+    transition: transform 0.3s ease;
+}
+#custom-time-modal.show .modal-content {
+    transform: scale(1);
+}
+#custom-time-modal h2 {
+    font-size: 1.3em;
+    margin-bottom: 18px;
+    color: var(--primary-color);
+    font-weight: 600;
+}
+#custom-time-modal .custom-time-input-group {
+    margin-bottom: 15px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+#custom-time-modal .custom-time-input-group label {
+    font-size: 1em;
+    color: var(--text-color);
+    font-weight: 500;
+}
+#custom-time-modal .custom-time-input-group input {
+    width: 100%;
+    padding: 10px;
+    font-size: 1em;
+    border: 1px solid var(--secondary-color);
+    border-radius: var(--border-radius);
+    background: var(--background-color);
+    color: var(--text-color);
+    outline: none;
+    transition: border-color 0.3s;
+}
+#custom-time-modal .custom-time-input-group input:focus {
+    border-color: var(--primary-color);
+}
+#custom-time-modal .modal-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 18px;
+    flex-wrap: wrap;
+}
+#custom-time-modal .menu-button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 1em;
+    background: var(--primary-color);
+    color: white;
+    transition: var(--transition);
+    position: relative;
+    overflow: hidden;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+#custom-time-modal .menu-button:hover {
+    background: #5b7bb7;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+#custom-time-modal .secondary-button {
+    background: var(--secondary-color);
+    color: var(--text-color);
+    border: 1px solid #555;
+}
+#custom-time-modal .secondary-button:hover {
+    background: #33363f;
+    border-color: #777;
+    color: var(--text-color);
+}
+#custom-time-modal .menu-button::before {
+    content: '';
+    position: absolute;
+    top: 0; left: -75%;
+    width: 50%; height: 100%;
+    background: linear-gradient(to right,rgba(255,255,255,0) 0%,rgba(255,255,255,0.2) 50%,rgba(255,255,255,0) 100%);
+    transform: skewX(-25deg);
+    transition: left 0.5s ease;
+}
+#custom-time-modal .menu-button:hover::before {
+    left: 125%;
+}
+
+/* Light theme for custom time modal */
+body.light-theme #custom-time-modal {
+    background: rgba(255,255,255,0.7);
+}
+body.light-theme #custom-time-modal .modal-content {
+    background: var(--light-surface-color);
+    color: var(--light-text-color);
+}
+body.light-theme #custom-time-modal h2 {
+    color: var(--light-primary-color);
+}
+body.light-theme #custom-time-modal .custom-time-input-group label {
+    color: var(--light-text-color);
+}
+body.light-theme #custom-time-modal .custom-time-input-group input {
+    background: var(--light-background-color);
+    color: var(--light-text-color);
+    border: 1px solid var(--light-secondary-color);
+}
+body.light-theme #custom-time-modal .custom-time-input-group input:focus {
+    border-color: var(--light-primary-color);
+}
+body.light-theme #custom-time-modal .menu-button {
+    background: var(--light-primary-color);
+    color: white;
+}
+body.light-theme #custom-time-modal .menu-button:hover {
+    background: #4a66a0;
+}
+body.light-theme #custom-time-modal .secondary-button {
+    background: var(--light-secondary-color);
+    color: var(--light-text-color);
+    border: 1px solid #ccc;
+}
+body.light-theme #custom-time-modal .secondary-button:hover {
+    background: #d5d5d5;
+    color: var(--light-text-color);
+    border-color: #bbb;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+    #custom-time-modal .modal-content {
+        padding: 15px;
+        max-width: 98%;
+    }
+    #custom-time-modal .modal-buttons {
+        gap: 8px;
+    }
+    #custom-time-modal .menu-button {
+        padding: 8px 12px;
+        font-size: 0.95em;
     }
 }

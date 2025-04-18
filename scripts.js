@@ -17,6 +17,7 @@ const K_FACTOR = 32;
 const TIME_SETTINGS = { // Time in seconds
     standard: 600, // 10 minutes
     blitz: 180,    // 3 minutes
+    bullet: 60,    // 1 minute <<< Added bullet time setting
     unlimited: 999999 // Effectively unlimited (used as flag)
 };
 
@@ -36,7 +37,9 @@ let selectedSquareAlg = null; // Algebraic notation of selected square (e.g., 'e
 let lastMoveHighlight = null; // { from: 'e2', to: 'e4' } algebraic notation
 let isGameOver = false;
 let gameMode = ''; // "human", "ai", "ai-vs-ai"
-let selectedTimeMode = 'standard'; // 'standard', 'blitz', 'unlimited'
+let selectedTimeMode = 'standard'; // 'standard', 'blitz', 'bullet', 'unlimited', 'custom' <<< Added 'custom'
+let customInitialTime = 0; // Custom time in seconds <<< Added
+let customIncrement = 0; // Custom increment in seconds <<< Added
 let aiDifficulty = '';
 let aiDifficultyWhite = '';
 let aiDifficultyBlack = '';
@@ -95,6 +98,12 @@ const difficultySelectionEl = document.getElementById('difficulty-selection');
 const aiVsAiDifficultySelectionEl = document.getElementById('ai-vs-ai-difficulty-selection');
 const gameLayoutEl = document.querySelector('.game-layout'); // Main game area container
 const statsContainerEl = document.getElementById('statistics'); // Stats container
+const customTimeModal = document.getElementById('custom-time-modal'); // <<< Assume this exists
+const customMinutesInput = document.getElementById('custom-minutes'); // <<< Assume this exists
+const customSecondsInput = document.getElementById('custom-seconds'); // <<< Assume this exists
+const customIncrementInput = document.getElementById('custom-increment'); // <<< Assume this exists
+const confirmCustomTimeButton = document.getElementById('confirm-custom-time'); // <<< Assume this exists
+const backToTimeFromCustomButton = document.getElementById('back-to-time-from-custom'); // <<< Added
 
 // Back buttons
 const backToModeButton = document.getElementById('back-to-mode');
@@ -231,17 +240,77 @@ function setupMenusAndButtons() {
     if (timeSelectionEl) {
         timeSelectionEl.querySelectorAll('.time-button').forEach(button => {
             button.addEventListener('click', () => {
-                selectedTimeMode = button.dataset.time;
-                timeSelectionEl.style.display = 'none';
-                // Proceed based on the stored gameMode (set in setupGameMode)
-                if (gameMode === 'ai') {
-                    if (difficultySelectionEl) difficultySelectionEl.style.display = 'block';
-                } else if (gameMode === 'human') {
-                    startGame(); // Start human vs human directly after time selection
+                const timeMode = button.dataset.time;
+                playSound('click'); // Play sound on time selection
+
+                if (timeMode === 'custom') {
+                    // Show custom time modal
+                    if (customTimeModal && customMinutesInput && customSecondsInput && customIncrementInput) {
+                        // Reset inputs to defaults or last used values if desired
+                        customMinutesInput.value = localStorage.getItem('customMinutes') || '10';
+                        customSecondsInput.value = localStorage.getItem('customSeconds') || '0';
+                        customIncrementInput.value = localStorage.getItem('customIncrement') || '0';
+
+                        customTimeModal.classList.add('show'); // <<< Use classList.add instead of style.display
+                        // timeSelectionEl.style.display = 'none'; // Hiding this might be handled by showScreen or similar logic later
+                        showScreen(customTimeModal, [timeSelectionEl]); // Use showScreen to manage visibility
+
+                    } else {
+                        console.error("Custom time modal or its input elements not found!");
+                        showToast("Erreur: Impossible d'ouvrir le modal de temps personnalisé.", 'error');
+                    }
+                } else {
+                    selectedTimeMode = timeMode;
+                    console.log(`Time mode selected: ${selectedTimeMode}`);
+                    // Proceed based on game mode
+                    if (gameMode === 'ai') {
+                        showScreen(difficultySelectionEl, [timeSelectionEl]);
+                    } else if (gameMode === 'human') {
+                        // Directly start game for Human vs Human after time selection
+                        startGame();
+                    } else {
+                        // Should not happen if menus are structured correctly
+                        console.error("Invalid state after time selection.");
+                        returnToMainMenu();
+                    }
                 }
             });
         });
     } else console.error("Time selection element not found.");
+
+    // Custom Time Modal Confirm Button
+    if (confirmCustomTimeButton) {
+        confirmCustomTimeButton.addEventListener('click', () => {
+            const minutes = parseInt(customMinutesInput.value, 10) || 0;
+            const seconds = parseInt(customSecondsInput.value, 10) || 0;
+            customIncrement = parseInt(customIncrementInput.value, 10) || 0;
+            customInitialTime = (minutes * 60) + seconds;
+
+            // Basic validation
+            if (customInitialTime <= 0) {
+                showToast("Le temps initial doit être supérieur à 0.", 'fa-exclamation-circle');
+                return;
+            }
+            if (customIncrement < 0) {
+                 showToast("L'incrément ne peut pas être négatif.", 'fa-exclamation-circle');
+                return;
+            }
+
+            selectedTimeMode = 'custom';
+            if (customTimeModal) customTimeModal.style.display = 'none'; // Hide modal
+
+            console.log(`DEBUG: Custom time confirmed. Mode: ${selectedTimeMode}, Initial: ${customInitialTime}s, Increment: ${customIncrement}s`); // <<< DEBUG LOG
+
+            // Proceed based on game mode
+            if (gameMode === 'ai') {
+                if (difficultySelectionEl) difficultySelectionEl.style.display = 'block';
+            } else if (gameMode === 'human') {
+                startGame();
+            }
+        });
+    } else {
+        console.warn("Confirm custom time button not found.");
+    }
 
     // Difficulty Selections (Player vs AI)
     if (difficultySelectionEl) {
@@ -262,9 +331,10 @@ function setupMenusAndButtons() {
     }
 
      // Back Buttons
-     if (backToModeButton) backToModeButton.addEventListener('click', () => showScreen(mainMenuEl, [timeSelectionEl]));
+     if (backToModeButton) backToModeButton.addEventListener('click', () => showScreen(mainMenuEl, [timeSelectionEl, customTimeModal])); // Hide custom modal too
      if (backToModeAivsAiButton) backToModeAivsAiButton.addEventListener('click', () => showScreen(mainMenuEl, [aiVsAiDifficultySelectionEl]));
      if (backToTimeButton) backToTimeButton.addEventListener('click', () => showScreen(timeSelectionEl, [difficultySelectionEl]));
+     if (backToTimeFromCustomButton) backToTimeFromCustomButton.addEventListener('click', () => showScreen(timeSelectionEl, [customTimeModal])); // <<< Added listener for back button in custom modal
 
     // In-Game Controls
     if (undoButton) undoButton.addEventListener('click', undoMove);
@@ -320,7 +390,8 @@ function updateFlipButtonVisualState() {
 function showScreen(screenToShow, screensToHide = []) {
     const allScreens = [
         mainMenuEl, timeSelectionEl, difficultySelectionEl,
-        aiVsAiDifficultySelectionEl, gameLayoutEl, statsContainerEl
+        aiVsAiDifficultySelectionEl, gameLayoutEl, statsContainerEl,
+        customTimeModal // <<< Add custom modal here
     ];
     allScreens.forEach(screen => {
         if (screen) screen.style.display = 'none';
@@ -528,13 +599,25 @@ function toggleAIDelay() {
 
 // --- Game Flow & Control ---
 function startGame() {
-    console.log(`Starting game: Mode=${gameMode}, Time=${selectedTimeMode}, AI=${aiDifficulty || (aiDifficultyWhite + '/' + aiDifficultyBlack)}`);
+    console.log(`DEBUG: startGame called. Mode=${gameMode}, TimeMode=${selectedTimeMode}, AI=${aiDifficulty || (aiDifficultyWhite + '/' + aiDifficultyBlack)}`); // <<< DEBUG LOG
+    if (selectedTimeMode === 'custom') {
+        console.log(`DEBUG: startGame custom settings: Initial=${customInitialTime}s, Increment=${customIncrement}s`); // <<< DEBUG LOG
+    }
     showGameEndModal(false); // Ensure end modal is hidden
     resetBoardState(); // Clean state
 
     // Set initial time based on selection
-    whiteTime = TIME_SETTINGS[selectedTimeMode] || TIME_SETTINGS.standard;
-    blackTime = TIME_SETTINGS[selectedTimeMode] || TIME_SETTINGS.standard;
+    if (selectedTimeMode === 'custom') {
+        whiteTime = customInitialTime;
+        blackTime = customInitialTime;
+    } else if (selectedTimeMode === 'unlimited') {
+        whiteTime = TIME_SETTINGS.unlimited;
+        blackTime = TIME_SETTINGS.unlimited;
+    } else {
+        whiteTime = TIME_SETTINGS[selectedTimeMode] || TIME_SETTINGS.standard;
+        blackTime = TIME_SETTINGS[selectedTimeMode] || TIME_SETTINGS.standard;
+    }
+    console.log(`DEBUG: startGame initial times set: W=${whiteTime}, B=${blackTime}`); // <<< DEBUG LOG
     updateTimerDisplay(); // Show initial time
 
     showScreen(gameLayoutEl); // Show the main game layout
@@ -825,10 +908,12 @@ function exportGamePGN() {
             White: player1NameEl?.textContent || "Joueur Blanc",
             Black: player2NameEl?.textContent || "Joueur Noir",
             Result: isGameOver ? gameResultToPGN(game) : "*" // Determine result if game is over
-            // Add TimeControl if needed: e.g., '180+0' for blitz, '600+0' for standard
+            // Add TimeControl if needed: e.g., '180+0' for blitz, '600+0' for standard, '60+0' for bullet, '600+5' for custom
         };
          if (selectedTimeMode !== 'unlimited' && gameMode !== 'ai-vs-ai') {
-             pgnHeaders.TimeControl = `${TIME_SETTINGS[selectedTimeMode]}+0`;
+             const initialTime = selectedTimeMode === 'custom' ? customInitialTime : TIME_SETTINGS[selectedTimeMode];
+             const increment = selectedTimeMode === 'custom' ? customIncrement : 0;
+             pgnHeaders.TimeControl = `${initialTime}+${increment}`;
          }
          if (gameMode === 'ai') {
             pgnHeaders.WhiteElo = playerRating.toString();
@@ -934,7 +1019,9 @@ function initiateGameReview() {
         Result: gameResultToPGN(game),
         ...(gameMode === 'ai' && { WhiteElo: playerRating.toString() }),
         ...(gameMode === 'ai' && { BlackElo: (difficultyRatings[aiDifficulty] || aiRating).toString() }),
-        ...(selectedTimeMode !== 'unlimited' && { TimeControl: `${TIME_SETTINGS[selectedTimeMode]}+0` })
+        ...(selectedTimeMode !== 'unlimited' && {
+            TimeControl: `${selectedTimeMode === 'custom' ? customInitialTime : TIME_SETTINGS[selectedTimeMode]}+${selectedTimeMode === 'custom' ? customIncrement : 0}`
+        }) // Updated to handle custom time
     };
 
     try {
@@ -1232,6 +1319,8 @@ function makeMove(fromAlg, toAlg, promotionChoice = null) {
     const fenBefore = game.fen();
     const currentTurn = game.turn(); // 'w' or 'b'
     const moveNumber = Math.floor(game.history().length / 2) + 1; // Correct move number calculation
+    const timeIncrement = selectedTimeMode === 'custom' ? customIncrement : 0; // Get increment
+    console.log(`DEBUG: makeMove start. Turn: ${currentTurn}, Increment: ${timeIncrement}s, W Time: ${whiteTime}, B Time: ${blackTime}`); // <<< DEBUG LOG
 
     // Prepare move object for chess.js
     const moveData = {
@@ -1270,6 +1359,18 @@ function makeMove(fromAlg, toAlg, promotionChoice = null) {
 
     // --- Move Successful ---
     console.log(`Move ${moveNumber}${currentTurn === 'w' ? '.' : '...'} ${moveResult.san} successful. New FEN: ${game.fen()}`);
+
+    // 0. Add increment BEFORE updating UI/checking game end (as per FIDE rules)
+    if (timeIncrement > 0 && selectedTimeMode !== 'unlimited') {
+        if (currentTurn === 'w') {
+            whiteTime += timeIncrement;
+        } else {
+            blackTime += timeIncrement;
+        }
+        console.log(`DEBUG: Added ${timeIncrement}s increment to ${currentTurn === 'w' ? 'White' : 'Black'}. New time: W=${whiteTime}, B=${blackTime}`); // <<< DEBUG LOG
+        // Update timer display immediately after increment if desired, or wait for updateAllUI
+        // updateTimerDisplay();
+    }
 
     // 1. Update last move highlight info
     lastMoveHighlight = { from: moveResult.from, to: moveResult.to };
@@ -1845,7 +1946,7 @@ function startTimer() {
         return;
     }
 
-    console.log(`Starting timer: W=${whiteTime}s, B=${blackTime}s`);
+    console.log(`DEBUG: Starting timer: W=${whiteTime}s, B=${blackTime}s` + (selectedTimeMode === 'custom' ? ` (+${customIncrement}s)` : '')); // <<< DEBUG LOG
     timerInterval = setInterval(() => {
         if (isGameOver) { clearInterval(timerInterval); return; }
 
@@ -1882,8 +1983,18 @@ function startTimer() {
 function resetTimer() {
      clearInterval(timerInterval);
      // Set time based on selected mode for the *next* game
-     whiteTime = TIME_SETTINGS[selectedTimeMode] || TIME_SETTINGS.standard;
-     blackTime = TIME_SETTINGS[selectedTimeMode] || TIME_SETTINGS.standard;
+     if (selectedTimeMode === 'custom') {
+         whiteTime = customInitialTime;
+         blackTime = customInitialTime;
+         // customIncrement remains as set by the user
+     } else if (selectedTimeMode === 'unlimited') {
+         whiteTime = TIME_SETTINGS.unlimited;
+         blackTime = TIME_SETTINGS.unlimited;
+     } else {
+         whiteTime = TIME_SETTINGS[selectedTimeMode] || TIME_SETTINGS.standard;
+         blackTime = TIME_SETTINGS[selectedTimeMode] || TIME_SETTINGS.standard;
+     }
+     console.log(`DEBUG: resetTimer called. SelectedMode: ${selectedTimeMode}, W Time: ${whiteTime}, B Time: ${blackTime}, CustomIncrement: ${customIncrement}`); // <<< DEBUG LOG
      // Don't update display here, startGame or returnToMainMenu will handle it
  }
 
@@ -1892,7 +2003,9 @@ function formatTime(seconds) {
     if (seconds < 0) seconds = 0; // Prevent negative display
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
+    // Add increment display if applicable and time is not unlimited
+    const incrementStr = (selectedTimeMode === 'custom' && customIncrement > 0) ? ` +${customIncrement}` : '';
+    return `${m}:${s < 10 ? '0' : ''}${s}${incrementStr}`;
 }
 function updateTimerDisplay() {
     if (!whiteTimeEl || !blackTimeEl) return;
@@ -1902,6 +2015,7 @@ function updateTimerDisplay() {
     // Highlight if time is low (e.g., under 30s) and it's that player's turn and time is not unlimited
     const isUrgentW = whiteTime <= 30 && whiteTime > 0 && selectedTimeMode !== 'unlimited' && !isGameOver;
     const isUrgentB = blackTime <= 30 && blackTime > 0 && selectedTimeMode !== 'unlimited' && !isGameOver;
+    // Consider increment - maybe urgent if time < increment * 5? Or just keep simple threshold.
     whiteTimeEl.classList.toggle('urgent', isUrgentW );
     blackTimeEl.classList.toggle('urgent', isUrgentB );
 }
