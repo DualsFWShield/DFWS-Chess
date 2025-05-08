@@ -2029,7 +2029,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log("Game loaded from localStorage for review.");
         statusEl.textContent = "Partie chargée depuis la session précédente.";
         updateAccuracyChartAndStats();
-        goToMove(fullGameHistory.length - 1);
+        goToMove(-1); // Aller à la position initiale après chargement
         startFullGameAnalysis();
     } else if (!loadedFromStorage && !pgnInputArea.value.trim()) {
         console.log("Starting in Analysis Board mode (initial position).");
