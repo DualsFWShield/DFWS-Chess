@@ -396,6 +396,94 @@
             margin: 0 auto;
         }
 
+        /* === Online Platform Import Styles === */
+        .pgn-input-group {
+            width: 100%;
+            margin-bottom: 8px;
+        }
+        .pgn-input-group label {
+            font-size: 0.95em;
+            color: var(--primary-color);
+            margin-bottom: 2px;
+            display: block;
+        }
+        .online-platform-input {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            width: 100%;
+        }
+        .online-platform-input input[type="text"] {
+            flex: 1 1 0;
+            padding: 7px 10px;
+            border: 1px solid var(--primary-color-low, #bbb);
+            border-radius: 4px;
+            font-size: 1em;
+            background: var(--surface-color, #222);
+            color: var(--text-color, #eee);
+            font-family: 'Roboto Mono', monospace;
+            min-width: 0;
+        }
+        .online-platform-input button {
+            white-space: nowrap;
+        }
+        .online-games-section {
+            background: var(--secondary-color, #222);
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin-bottom: 18px;
+            margin-top: 10px;
+        }
+        #online-games-list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 8px 0;
+            max-height: 220px;
+            overflow-y: auto;
+            font-size: 0.97em;
+        }
+        #online-games-list li {
+            padding: 5px 0;
+            border-bottom: 1px solid var(--primary-color-low, #444);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        #online-games-list li:last-child {
+            border-bottom: none;
+        }
+        #online-games-list li:hover {
+            background: rgba(100, 160, 255, 0.08);
+        }
+        .online-games-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 18px;
+            align-items: center;
+            margin-top: 8px;
+        }
+        .date-filter-section {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        .date-filter-section label {
+            font-size: 0.93em;
+            color: var(--primary-color);
+        }
+        .date-filter-section input[type="date"] {
+            padding: 4px 7px;
+            border-radius: 3px;
+            border: 1px solid var(--primary-color-low, #bbb);
+            background: var(--surface-color, #222);
+            color: var(--text-color, #eee);
+            font-size: 0.97em;
+        }
+        #online-games-status {
+            min-height: 1.2em;
+            margin-bottom: 5px;
+            font-size: 0.97em;
+        }
+
         /* Responsive adjustments */
         @media (max-width: 992px) {
             .review-layout {
@@ -492,6 +580,41 @@
             <h3>Importer PGN</h3>
             <textarea id="pgn-input-area" placeholder="Collez le PGN de la partie ici..."></textarea>
             <button id="load-pgn-button" class="btn primary-btn">Charger et Analyser PGN</button>
+            <hr style="border-color: var(--primary-color-low); margin: 15px 0;">
+            <h4>Importer depuis une plateforme :</h4>
+            <div class="pgn-input-group">
+                <label for="lichess-username">Nom d'utilisateur Lichess :</label>
+                <div class="online-platform-input">
+                    <input type="text" id="lichess-username" placeholder="Ex: DrNykterstein">
+                    <button id="fetch-lichess-games" class="btn secondary-btn">Charger parties Lichess</button>
+                </div>
+            </div>
+            <div class="pgn-input-group">
+                <label for="chesscom-username">Nom d'utilisateur Chess.com :</label>
+                <div class="online-platform-input">
+                    <input type="text" id="chesscom-username" placeholder="Ex: Hikaru">
+                    <button id="fetch-chesscom-games" class="btn secondary-btn">Charger parties Chess.com</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section pour afficher les parties récupérées -->
+        <div class="online-games-section" id="online-games-container" style="display: none;">
+            <h3>Parties en Ligne Récupérées</h3>
+            <div id="online-games-status"></div>
+            <div id="online-games-list-container">
+                <ul id="online-games-list"></ul>
+            </div>
+            <div class="online-games-controls">
+                <button id="load-more-online-games" class="btn primary-btn" style="display: none;">Charger plus de parties</button>
+                <div class="date-filter-section">
+                    <label for="filter-start-date">Du:</label>
+                    <input type="date" id="filter-start-date">
+                    <label for="filter-end-date">Au:</label>
+                    <input type="date" id="filter-end-date">
+                    <button id="search-games-by-date" class="btn secondary-btn">Rechercher par date</button>
+                </div>
+            </div>
         </div>
 
         <div id="review-status">Chargement...</div>

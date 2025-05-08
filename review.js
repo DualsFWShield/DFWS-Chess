@@ -1783,6 +1783,239 @@ function applyTheme() {
     document.body.className = theme;
 }
 
+// --- Online Games Import (Lichess & Chess.com) ---
+const lichessUsernameInput = document.getElementById('lichess-username');
+const chesscomUsernameInput = document.getElementById('chesscom-username');
+const fetchLichessBtn = document.getElementById('fetch-lichess-games');
+const fetchChesscomBtn = document.getElementById('fetch-chesscom-games');
+const onlineGamesContainer = document.getElementById('online-games-container');
+const onlineGamesStatus = document.getElementById('online-games-status');
+const onlineGamesList = document.getElementById('online-games-list');
+const loadMoreOnlineGamesBtn = document.getElementById('load-more-online-games');
+const filterStartDateInput = document.getElementById('filter-start-date');
+const filterEndDateInput = document.getElementById('filter-end-date');
+const searchGamesByDateBtn = document.getElementById('search-games-by-date');
+
+let onlineGamesState = {
+    platform: null, // 'lichess' | 'chesscom'
+    username: null,
+    games: [],
+    page: 1,
+    perPage: 50,
+    hasMore: true,
+    loading: false,
+    dateFilter: null // {from, to}
+};
+
+function resetOnlineGamesUI() {
+    onlineGamesList.innerHTML = '';
+    onlineGamesStatus.textContent = '';
+    loadMoreOnlineGamesBtn.style.display = 'none';
+    onlineGamesContainer.style.display = 'none';
+    onlineGamesState.games = [];
+    onlineGamesState.page = 1;
+    onlineGamesState.hasMore = true;
+    onlineGamesState.loading = false;
+    onlineGamesState.dateFilter = null;
+}
+
+function showOnlineGamesUI() {
+    onlineGamesContainer.style.display = '';
+}
+
+function renderOnlineGamesList() {
+    onlineGamesList.innerHTML = '';
+    if (!onlineGamesState.games.length) {
+        onlineGamesList.innerHTML = '<li style="opacity:0.7;">Aucune partie trouvée.</li>';
+        return;
+    }
+    onlineGamesState.games.forEach((g, idx) => {
+        const li = document.createElement('li');
+        li.innerHTML = `<b>${g.white} vs ${g.black}</b> (${g.result}) <small>${g.date} • ${g.site}</small>`;
+        li.title = g.event || '';
+        li.style.cursor = 'pointer';
+        li.onclick = () => {
+            if (g.pgn) {
+                pgnInputArea.value = g.pgn;
+                onlineGamesContainer.style.display = 'none';
+                loadPgnButton.click();
+            }
+        };
+        onlineGamesList.appendChild(li);
+    });
+}
+
+function setOnlineGamesStatus(msg, isError = false) {
+    onlineGamesStatus.textContent = msg;
+    onlineGamesStatus.style.color = isError ? 'red' : '';
+}
+
+async function fetchLichessGames(username, page = 1, perPage = 50, dateFilter = null) {
+    setOnlineGamesStatus('Chargement des parties Lichess...');
+    let url = `https://lichess.org/api/games/user/${encodeURIComponent(username)}?max=${perPage}&page=${page}&pgnInJson=true&clocks=false&evals=false&opening=true&tags=true&perfType=all`;
+    if (dateFilter && dateFilter.from) url += `&since=${dateFilter.from}`;
+    if (dateFilter && dateFilter.to) url += `&until=${dateFilter.to}`;
+    try {
+        const resp = await fetch(url, { headers: { 'Accept': 'application/x-ndjson' } });
+        if (!resp.ok) throw new Error('Utilisateur ou requête invalide');
+        const text = await resp.text();
+        const lines = text.trim().split('\n');
+        const games = [];
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+                const obj = JSON.parse(line);
+                games.push({
+                    white: obj.players.white.user?.name || obj.players.white.userId || 'Blanc',
+                    black: obj.players.black.user?.name || obj.players.black.userId || 'Noir',
+                    result: obj.status || obj.winner || '',
+                    date: obj.createdAt ? (new Date(obj.createdAt)).toLocaleDateString() : '',
+                    site: 'Lichess',
+                    event: obj.opening?.name || '',
+                    pgn: obj.pgn
+                });
+            } catch {}
+        }
+        return games;
+    } catch (e) {
+        setOnlineGamesStatus('Erreur Lichess: ' + e.message, true);
+        return [];
+    }
+}
+
+async function fetchChesscomGames(username, page = 1, perPage = 50, dateFilter = null) {
+    setOnlineGamesStatus('Chargement des parties Chess.com...');
+    try {
+        // Chess.com API: must fetch archives, then fetch games for each month
+        const archivesResp = await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(username)}/games/archives`);
+        if (!archivesResp.ok) throw new Error('Utilisateur ou requête invalide');
+        const archives = await archivesResp.json();
+        let archiveUrls = archives.archives || [];
+        archiveUrls = archiveUrls.reverse(); // Most recent first
+
+        let games = [];
+        for (let i = 0; i < archiveUrls.length && games.length < perPage * page; i++) {
+            const url = archiveUrls[i];
+            const monthResp = await fetch(url);
+            if (!monthResp.ok) continue;
+            const monthData = await monthResp.json();
+            for (const g of monthData.games) {
+                // Date filter
+                const endTime = g.end_time ? new Date(g.end_time * 1000) : null;
+                if (dateFilter) {
+                    if (dateFilter.from && endTime && endTime < new Date(dateFilter.from)) continue;
+                    if (dateFilter.to && endTime && endTime > new Date(dateFilter.to)) continue;
+                }
+                games.push({
+                    white: g.white?.username || 'Blanc',
+                    black: g.black?.username || 'Noir',
+                    result: g.white?.result && g.black?.result ? `${g.white.result}-${g.black.result}` : '',
+                    date: endTime ? endTime.toLocaleDateString() : '',
+                    site: 'Chess.com',
+                    event: g.tournament || '',
+                    pgn: g.pgn
+                });
+                if (games.length >= perPage * page) break;
+            }
+        }
+        // Paginate
+        const startIdx = perPage * (page - 1);
+        return games.slice(startIdx, startIdx + perPage);
+    } catch (e) {
+        setOnlineGamesStatus('Erreur Chess.com: ' + e.message, true);
+        return [];
+    }
+}
+
+async function handleFetchOnlineGames(platform) {
+    resetOnlineGamesUI();
+    let username = '';
+    if (platform === 'lichess') username = lichessUsernameInput.value.trim();
+    if (platform === 'chesscom') username = chesscomUsernameInput.value.trim();
+    if (!username) {
+        setOnlineGamesStatus('Veuillez entrer un pseudo.', true);
+        return;
+    }
+    showOnlineGamesUI();
+    onlineGamesState.platform = platform;
+    onlineGamesState.username = username;
+    onlineGamesState.page = 1;
+    onlineGamesState.hasMore = true;
+    onlineGamesState.games = [];
+    onlineGamesState.loading = true;
+    onlineGamesState.dateFilter = null;
+    setOnlineGamesStatus('Chargement...');
+    let games = [];
+    if (platform === 'lichess') {
+        games = await fetchLichessGames(username, 1, onlineGamesState.perPage);
+    } else {
+        games = await fetchChesscomGames(username, 1, onlineGamesState.perPage);
+    }
+    onlineGamesState.games = games;
+    onlineGamesState.loading = false;
+    onlineGamesState.hasMore = games.length === onlineGamesState.perPage;
+    renderOnlineGamesList();
+    setOnlineGamesStatus(`${games.length} parties chargées${onlineGamesState.hasMore ? ' (plus disponibles)' : ''}.`);
+    loadMoreOnlineGamesBtn.style.display = onlineGamesState.hasMore ? '' : 'none';
+}
+
+async function handleLoadMoreOnlineGames() {
+    if (onlineGamesState.loading || !onlineGamesState.hasMore) return;
+    onlineGamesState.page += 1;
+    onlineGamesState.loading = true;
+    setOnlineGamesStatus('Chargement de plus de parties...');
+    let games = [];
+    if (onlineGamesState.platform === 'lichess') {
+        games = await fetchLichessGames(onlineGamesState.username, onlineGamesState.page, onlineGamesState.perPage, onlineGamesState.dateFilter);
+    } else {
+        games = await fetchChesscomGames(onlineGamesState.username, onlineGamesState.page, onlineGamesState.perPage, onlineGamesState.dateFilter);
+    }
+    if (games.length) {
+        onlineGamesState.games = onlineGamesState.games.concat(games);
+        renderOnlineGamesList();
+        setOnlineGamesStatus(`${onlineGamesState.games.length} parties chargées${games.length === onlineGamesState.perPage ? ' (plus disponibles)' : ''}.`);
+        onlineGamesState.hasMore = games.length === onlineGamesState.perPage;
+        loadMoreOnlineGamesBtn.style.display = onlineGamesState.hasMore ? '' : 'none';
+    } else {
+        setOnlineGamesStatus('Aucune partie supplémentaire trouvée.');
+        onlineGamesState.hasMore = false;
+        loadMoreOnlineGamesBtn.style.display = 'none';
+    }
+    onlineGamesState.loading = false;
+}
+
+async function handleSearchGamesByDate() {
+    if (!onlineGamesState.platform || !onlineGamesState.username) return;
+    const from = filterStartDateInput.value ? new Date(filterStartDateInput.value).getTime() : null;
+    const to = filterEndDateInput.value ? new Date(filterEndDateInput.value).getTime() : null;
+    onlineGamesState.dateFilter = { from, to };
+    onlineGamesState.page = 1;
+    onlineGamesState.games = [];
+    onlineGamesState.hasMore = true;
+    onlineGamesState.loading = true;
+    setOnlineGamesStatus('Recherche par date...');
+    let games = [];
+    if (onlineGamesState.platform === 'lichess') {
+        games = await fetchLichessGames(onlineGamesState.username, 1, onlineGamesState.perPage, { from, to });
+    } else {
+        games = await fetchChesscomGames(onlineGamesState.username, 1, onlineGamesState.perPage, { from, to });
+    }
+    onlineGamesState.games = games;
+    onlineGamesState.loading = false;
+    onlineGamesState.hasMore = games.length === onlineGamesState.perPage;
+    renderOnlineGamesList();
+    setOnlineGamesStatus(`${games.length} parties chargées${onlineGamesState.hasMore ? ' (plus disponibles)' : ''}.`);
+    loadMoreOnlineGamesBtn.style.display = onlineGamesState.hasMore ? '' : 'none';
+}
+
+// --- UI Setup (additions) ---
+function setupOnlineGamesUI() {
+    if (fetchLichessBtn) fetchLichessBtn.onclick = () => handleFetchOnlineGames('lichess');
+    if (fetchChesscomBtn) fetchChesscomBtn.onclick = () => handleFetchOnlineGames('chesscom');
+    if (loadMoreOnlineGamesBtn) loadMoreOnlineGamesBtn.onclick = handleLoadMoreOnlineGames;
+    if (searchGamesByDateBtn) searchGamesByDateBtn.onclick = handleSearchGamesByDate;
+}
+
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
     initStockfish_Review();
@@ -1790,6 +2023,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupUI();
     initAccuracyChart();
     applyTheme();
+    setupOnlineGamesUI();
 
     if (loadedFromStorage && fullGameHistory.length > 0) {
         console.log("Game loaded from localStorage for review.");
