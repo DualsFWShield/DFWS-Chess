@@ -1429,143 +1429,468 @@ function initAccuracyChart() {
 function classifyMove(moveIndex) {
     if (moveIndex < 0 || moveIndex >= fullGameHistory.length) return;
 
-    const dataIndexBefore = moveIndex;     // Analysis data for the position *before* the move
-    const dataIndexAfter = moveIndex + 1;  // Analysis data for the position *after* the move
+    const dataIndexBefore = moveIndex;
+    const dataIndexAfter = moveIndex + 1;
 
     const analysisBefore = moveAnalysisData[dataIndexBefore];
-    const analysisAfter  = moveAnalysisData[dataIndexAfter]; // This stores eval *before* the NEXT move
-    const playedMove     = fullGameHistory[moveIndex];
+    const analysisAfter = moveAnalysisData[dataIndexAfter];
+    const playedMove = fullGameHistory[moveIndex];
 
-    // evalBeforeMove is the evaluation of the position *before* playedMove was made
+    // --- Chess.com "Theoretical" Moves ---
+    // List of classic opening moves (UCI format, lowercase, no promotion)
+    // This is a small sample; expand as needed for more coverage.
+    // List of classic opening moves (UCI format, lowercase, no promotion)
+    // Expanded with many more theoretical moves from major openings.
+    // Note: This is still not exhaustive, but covers most main lines up to 6-8 moves.
+    const THEORETICAL_UCI_MOVES = new Set([
+        // King's Pawn Openings (e4 e5)
+        "e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "f1b5", "g8f6", "b1c3", "g1f3", "d2d4", "e4d5", "d7d6", "d2d3", "c2c3", "c7c6", "b1c3", "a2a3", "a7a6", "c4b5", "f3e5", "d4e5", "f6e4", "d1e2", "d1f3", "d1d2", "d1d3", "d1e2", "c1e3", "c1g5", "c1f4", "c1d2", "c1e3", "c1g5", "c1f4", "c1d2", "c1e3", "c1g5", "c1f4", "c1d2", "c1e3", "c1g5", "c1f4", "c1d2",
+        // Italian Game
+        "e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "c2c3", "g1f3", "d2d3", "d7d6", "b1c3", "g8f6", "d2d4", "e5d4", "c3d4", "c5d4", "f3d4", "c6d4", "c4b5", "a7a6", "b5a4", "d7d6", "c1e3", "c1g5", "c1f4", "c1d2", "d1e2", "d1f3", "d1d2", "d1d3", "d1e2",
+        // Ruy Lopez
+        "e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5a4", "g8f6", "e1g1", "f8e7", "f1e1", "b7b5", "a4b3", "d7d6", "c2c3", "c6a5", "d2d4", "e5d4", "c3d4", "c8g4", "h2h3", "g4h5", "d4e5", "d6e5", "d1d8", "e7d8", "b3d1", "c6d4", "f3d4", "e5d4", "d1h5", "h5e2", "e2d1",
+        // Scotch Game
+        "e2e4", "e7e5", "g1f3", "b8c6", "d2d4", "e5d4", "f3d4", "g8f6", "b1c3", "f8c5", "c1e3", "d7d6", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Petrov
+        "e2e4", "e7e5", "g1f3", "g8f6", "d2d4", "e5d4", "f3d4", "f8c5", "b1c3", "d7d6", "c1e3", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Vienna Game
+        "e2e4", "e7e5", "b1c3", "g8f6", "f2f4", "d7d5", "e4d5", "c6d5", "g1f3", "f8c5", "f1c4", "d2d3", "d7d6", "c1e3", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Bishop's Opening
+        "e2e4", "e7e5", "f1c4", "b8c6", "g1f3", "g8f6", "d2d3", "d7d6", "c2c3", "c6a5", "d1e2", "d1f3", "d1d2", "d1d3", "d1e2",
+        // King's Gambit
+        "e2e4", "e7e5", "f2f4", "e5f4", "g1f3", "g8f6", "f1c4", "f8c5", "d2d4", "c7c6", "b1c3", "d7d6", "c1e3", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Center Game
+        "e2e4", "e7e5", "d2d4", "e5d4", "d1d4", "b8c6", "d4e3", "g8f6", "b1c3", "f8c5", "f1c4", "d7d6", "c1e3", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // French Defense
+        "e2e4", "e7e6", "d2d4", "d7d5", "b1c3", "g8f6", "g1f3", "c7c5", "e4e5", "f8e7", "g1f3", "c8d7", "f1d3", "b8c6", "c1e3", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Advance French
+        "e2e4", "e7e6", "d2d4", "d7d5", "e4e5", "c7c5", "c2c3", "b8c6", "g1f3", "g8e7", "f1d3", "d8b6", "a2a3", "c5d4", "c3d4", "c8d7", "b1c3", "f8e7",
+        // Tarrasch French
+        "e2e4", "e7e6", "d2d4", "d7d5", "b1d2", "c7c5", "g1f3", "g8e7", "f1d3", "d8b6", "a2a3", "c5d4", "c3d4", "c8d7", "b1c3", "f8e7",
+        // Sicilian Defense
+        "e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "b1c3", "a7a6", "d7d6", "g8f6", "f1c4", "e7e6", "c1e3", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Najdorf
+        "e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "b1c3", "a7a6", "f1e2", "e7e6", "c1e3", "b8d7", "f2f4", "b7b5", "a2a3", "c8b7", "d4b3", "f8e7",
+        // Dragon
+        "e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "b1c3", "g7g6", "f1e2", "f8g7", "c1e3", "e7e6", "d1d2", "e8g8", "f2f3", "b8c6", "e1c1",
+        // Scheveningen
+        "e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "b1c3", "e7e6", "f1e2", "b8d7", "f2f4", "a7a6", "a2a4", "c8e7", "e1g1",
+        // Caro-Kann
+        "e2e4", "c7c6", "d2d4", "d7d5", "b1c3", "d5e4", "c3e4", "g8f6", "g1f3", "b8d7", "f1d3", "g7g6", "c1g5", "h7h6", "g5h4", "e7e6", "c1e3", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Advance Caro-Kann
+        "e2e4", "c7c6", "d2d4", "d7d5", "e4e5", "c8f5", "g1f3", "e7e6", "b1d2", "c6c5", "c2c3", "b8c6", "f1e2", "d8b6", "a2a3", "c5d4", "c3d4", "f8e7",
+        // Panov-Botvinnik
+        "e2e4", "c7c6", "d2d4", "d7d5", "e4d5", "c6d5", "c2c4", "g8f6", "b1c3", "e7e6", "g1f3", "f8e7", "c4d5", "e6d5", "f1d3", "e8g8", "e1g1",
+        // Pirc/Modern
+        "e2e4", "d7d6", "d2d4", "g7g6", "b1c3", "f8g7", "g1f3", "g8f6", "f1e2", "e7e5", "f1c4", "e7e6", "c1e3", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Alekhine's Defense
+        "e2e4", "g8f6", "e4e5", "f6d5", "d2d4", "d7d6", "c2c4", "d5b6", "f1e2", "g7g6", "b1c3", "f8g7", "g1f3", "e7e6", "c1e3", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Scandinavian
+        "e2e4", "d7d5", "e4d5", "d8d5", "b1c3", "d5a5", "d2d4", "g8f6", "g1f3", "c7c6", "f1c4", "c8f5", "c1d2", "d1e2", "d1d2", "d1f3", "d1e2",
+        // Nimzowitsch
+        "e2e4", "b8c6", "d2d4", "d7d5", "b1c3", "g8f6", "e4e5", "f6e4", "c1e3", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Queen's Pawn Openings (d4 d5)
+        "d2d4", "d7d5", "c2c4", "e7e6", "g1f3", "g8f6", "b1c3", "f8e7", "c1g5", "h7h6", "g5h4", "b8d7", "e2e3", "c7c6", "f1d3", "d8c7", "e1g1", "a2a3", "a7a6", "c4d5", "e6d5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Queen's Gambit Declined
+        "d2d4", "d7d5", "c2c4", "e7e6", "g1f3", "g8f6", "b1c3", "f8e7", "c1g5", "h7h6", "g5h4", "b8d7", "e2e3", "c7c6", "f1d3", "d8c7", "e1g1", "a2a3", "a7a6", "c4d5", "e6d5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Queen's Gambit Accepted
+        "d2d4", "d7d5", "c2c4", "d5c4", "g1f3", "g8f6", "e2e3", "e7e6", "f1c4", "c7c5", "e1g1", "b8c6", "d4c5", "f8c5", "d1e2", "d1d2", "d1f3", "d1e2",
+        // Slav Defense
+        "d2d4", "d7d5", "c2c4", "c7c6", "g1f3", "g8f6", "b1c3", "d5c4", "a2a4", "b7b5", "e2e3", "e7e6", "f1e2", "b8d7", "e1g1", "a7a6", "c1d2", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Semi-Slav
+        "d2d4", "d7d5", "c2c4", "c7c6", "g1f3", "g8f6", "b1c3", "e7e6", "e2e3", "f8d6", "f1d3", "b8d7", "e1g1", "a7a6", "c1d2", "d1c2", "d1d2", "d1f3", "d1e2",
+        // King's Indian Defense
+        "d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7", "e2e4", "d7d6", "g1f3", "e7e5", "f1e2", "e8g8", "e1g1", "c7c6", "h2h3", "b8d7", "c1e3", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Grünfeld Defense
+        "d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "d7d5", "c4d5", "f6d5", "e2e4", "d5c3", "b2c3", "f8g7", "g1f3", "c7c5", "f1e2", "e8g8", "e1g1", "b8c6", "d4d5", "c6a5", "c1d2", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Nimzo-Indian Defense
+        "d2d4", "g8f6", "c2c4", "e7e6", "b1c3", "f8b4", "g1f3", "d7d5", "e2e3", "b4c3", "b2c3", "e8g8", "f1d3", "d8e7", "e1g1", "a7a6", "c1a3", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Queen's Indian Defense
+        "d2d4", "g8f6", "c2c4", "e7e6", "g1f3", "b7b6", "g2g3", "c8b7", "f1g2", "f8e7", "e1g1", "e8g8", "b1c3", "d7d5", "c4d5", "f6d5", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Catalan
+        "d2d4", "g8f6", "c2c4", "e7e6", "g2g3", "d7d5", "f1g2", "f8e7", "g1f3", "e8g8", "e1g1", "b8d7", "b1c3", "c7c6", "d1c2", "d1d2", "d1f3", "d1e2",
+        // English Opening
+        "c2c4", "e7e5", "g1f3", "b8c6", "g2g3", "g8f6", "f1g2", "d7d5", "c4d5", "f6d5", "b1c3", "f8e7", "e1g1", "e8g8", "d2d3", "d7d6", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Symmetrical English
+        "c2c4", "c7c5", "g1f3", "g8f6", "g2g3", "g7g6", "f1g2", "f8g7", "e1g1", "e8g8", "b1c3", "b8c6", "d2d3", "d7d6", "c1g5", "c1f4", "c1d2", "d1d2", "d1f3", "d1e2",
+        // Reti
+        "g1f3", "d7d5", "c2c4", "e7e6", "g2g3", "g8f6", "f1g2", "f8e7", "d2d4", "e8g8", "e1g1", "b1c3", "b8d7", "d1c2", "d1d2", "d1f3", "d1e2",
+        // King's Indian Attack
+        "e2e4", "e7e6", "d2d3", "d7d5", "g1f3", "g8f6", "b1d2", "c7c5", "g2g3", "b8c6", "f1g2", "f8e7", "e1g1", "e8g8", "d1e2", "d1d2", "d1f3", "d1e2",
+        // London System
+        "d2d4", "d7d5", "g1f3", "g8f6", "c1f4", "e7e6", "e2e3", "f8d6", "f1d3", "b8d7", "b1d2", "e8g8", "e1g1", "d1e2", "d1d2", "d1f3", "d1e2",
+        // Colle System
+        "d2d4", "d7d5", "g1f3", "g8f6", "e2e3", "e7e6", "f1d3", "f8d6", "b1d2", "b8d7", "c2c3", "e8g8", "e1g1", "d1e2", "d1d2", "d1f3", "d1e2",
+        // Torre Attack
+        "d2d4", "d7d5", "g1f3", "g8f6", "f1g5", "e7e6", "e2e3", "f8e7", "b1d2", "b8d7", "c2c3", "e8g8", "e1g1", "d1e2", "d1d2", "d1f3", "d1e2",
+        // Stonewall
+        "d2d4", "d7d5", "e2e3", "e7e6", "f1d3", "f8d6", "g1f3", "g8f6", "c2c3", "b8d7", "b1d2", "e8g8", "e1g1", "d1e2", "d1d2", "d1f3", "d1e2",
+        // Dutch Defense
+        "d2d4", "f7f5", "g1f3", "g8f6", "g2g3", "e7e6", "f1g2", "f8e7", "e1g1", "e8g8", "c2c4", "d7d6", "b1c3", "b8d7", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Benoni
+        "d2d4", "g8f6", "c2c4", "c7c5", "d4d5", "e7e6", "g1f3", "e6d5", "c4d5", "d7d6", "b1c3", "g7g6", "e2e4", "f8g7", "f1e2", "e8g8", "e1g1", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Benko Gambit
+        "d2d4", "g8f6", "c2c4", "c7c5", "d4d5", "b7b5", "c4b5", "a6b5", "g1f3", "g7g6", "b1c3", "f8g7", "e2e4", "d7d6", "f1e2", "e8g8", "e1g1", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Modern Defense
+        "e2e4", "g7g6", "d2d4", "f8g7", "b1c3", "d7d6", "g1f3", "g8f6", "f1e2", "e8g8", "e1g1", "c2c4", "b8c6", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Owen's Defense
+        "e2e4", "b7b6", "d2d4", "c8b7", "b1c3", "e7e6", "g1f3", "g8f6", "f1d3", "f8e7", "e1g1", "e8g8", "c2c4", "d7d5", "d1c2", "d1d2", "d1f3", "d1e2",
+        // English Defense
+        "d2d4", "e7e6", "c2c4", "b7b6", "b1c3", "c8b7", "g1f3", "g8f6", "f1g2", "f8e7", "e1g1", "e8g8", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Polish Opening
+        "b2b4", "e7e5", "c2c4", "g8f6", "b1c3", "f8b4", "g1f3", "e8g8", "e1g1", "d2d4", "d7d5", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Bird's Opening
+        "f2f4", "d7d5", "g1f3", "g8f6", "e2e3", "c7c5", "b1c3", "b8c6", "f1b5", "e7e6", "e1g1", "e8g8", "d2d4", "d1c2", "d1d2", "d1f3", "d1e2",
+        // King's Fianchetto
+        "g2g3", "d7d5", "f1g2", "g8f6", "g1f3", "e7e6", "e1g1", "e8g8", "d2d4", "c7c5", "b1c3", "b8c6", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Queen's Fianchetto
+        "b2b3", "d7d5", "c1b2", "g8f6", "g1f3", "e7e6", "e1g1", "e8g8", "d2d4", "c7c5", "b1c3", "b8c6", "d1c2", "d1d2", "d1f3", "d1e2",
+        // Miscellaneous
+        "e2e3", "d2d3", "c2c3", "f2f3", "g2g4", "h2h4", "a2a4", "b2b4", "h2h3", "a2a3", "b2b3", "g2g3", "f2f4", "c2c4", "d2d4", "e2e4", "g1f3", "b1c3"
+    ]);
+    // Always use lowercase for UCI comparison
+    const playedMoveUCI = (playedMove.from + playedMove.to + (playedMove.promotion || '')).toLowerCase();
+
+    // --- If move is theoretical, override classification ---
+    if (THEORETICAL_UCI_MOVES.has(playedMoveUCI)) {
+        if (moveAnalysisData[dataIndexAfter]) {
+            moveAnalysisData[dataIndexAfter].classification = "Théorique";
+            updateMoveListClassification(moveIndex, "Théorique");
+        }
+        return;
+    }
+
+    // --- Expected Points Model (Chess.com V2) ---
+    // See: https://www.chess.com/article/view/accuracy-and-move-classification
+
+    // Helper: Convert eval to expected points (EP)
+    function evalToEP(evalVal) {
+        // Mate: 1.0 (win) or 0.0 (loss)
+        if (typeof evalVal === "string" && evalVal.startsWith("M")) {
+            const mateVal = parseInt(evalVal.substring(1));
+            return mateVal > 0 ? 1.0 : 0.0;
+        }
+        if (typeof evalVal === "number") {
+            // Sigmoid mapping, Chess.com style (approximate)
+            // 0.5 + 0.5 * tanh(eval/4.0)
+            // eval in pawns, so +4 = 0.99, -4 = 0.01
+            const x = Math.max(-10, Math.min(10, evalVal));
+            return 0.5 + 0.5 * Math.tanh(x / 4.0);
+        }
+        return 0.5;
+    }
+
+    // Get eval before and after move
     const evalBeforeMove = analysisBefore?.eval_before;
-    // evalAfterPlayed is the evaluation of the position *after* playedMove was made
-    // This comes from the 'eval_before' field of the *next* analysis entry (analysisAfter)
     const evalAfterPlayed = analysisAfter?.eval_before;
 
     if (evalBeforeMove === null || evalAfterPlayed === null) {
-        console.log(`Classification deferred for move ${moveIndex + 1} (${playedMove.san}): missing eval data. Before: ${evalBeforeMove}, After: ${evalAfterPlayed}`);
-        if (moveAnalysisData[dataIndexAfter]) { // Store nulls if data is incomplete
+        if (moveAnalysisData[dataIndexAfter]) {
             moveAnalysisData[dataIndexAfter].classification = null;
             moveAnalysisData[dataIndexAfter].cpl = null;
         }
-        // Attempt to update UI even with partial data or to clear old data
         updateMoveListClassification(moveIndex, null);
         return;
     }
 
-    const cpEquivalentMate = 10000; // Large value for mate
-    let cpBefore = 0;
-    let cpAfterPlayed = 0;
-    const turnMultiplier = (playedMove.color === 'w') ? 1 : -1;
+    // Calculate expected points before and after the move
+    const epBefore = evalToEP(evalBeforeMove);
+    const epAfter = evalToEP(evalAfterPlayed);
 
-    // Convert evalBeforeMove to centipawns
-    if (typeof evalBeforeMove === 'string' && evalBeforeMove.startsWith('M')) {
-        const mateVal = parseInt(evalBeforeMove.substring(1));
-        cpBefore = (mateVal * turnMultiplier > 0 ? cpEquivalentMate : -cpEquivalentMate) * turnMultiplier;
-    } else {
-        cpBefore = evalBeforeMove * 100;
+    // For the player who played the move, EP loss is (epBefore - epAfter)
+    // If it's opponent's turn after, invert sign
+    const color = playedMove.color;
+    const turnMultiplier = (color === 'w') ? 1 : -1;
+    let epLost = epBefore - epAfter;
+    // If after the move, it's opponent's turn, invert
+    // But in this model, epAfter is always for the player who just moved (since eval is always from the side to move)
+    // So, no inversion needed.
+
+    // Store CPL for accuracy chart (for backward compatibility)
+    // Convert evals to centipawns (for CPL)
+    function evalToCp(evalVal, color) {
+        if (typeof evalVal === "string" && evalVal.startsWith("M")) {
+            const mateVal = parseInt(evalVal.substring(1));
+            return mateVal > 0 ? 10000 : -10000;
+        }
+        if (typeof evalVal === "number") {
+            return Math.round(evalVal * 100);
+        }
+        return 0;
     }
-
-    // Convert evalAfterPlayed to centipawns
-    if (typeof evalAfterPlayed === 'string' && evalAfterPlayed.startsWith('M')) {
-        const mateVal = parseInt(evalAfterPlayed.substring(1));
-        // Note: evalAfterPlayed is from the perspective of the player whose turn it is IN THAT FEN.
-        // So, if it's M3, it's mate in 3 for the current player in that FEN.
-        cpAfterPlayed = (mateVal * turnMultiplier > 0 ? cpEquivalentMate : -cpEquivalentMate) * turnMultiplier;
-    } else {
-        cpAfterPlayed = evalAfterPlayed * 100;
-    }
-
-    // Calculate Centipawn Loss (CPL)
-    // CPL = (eval before move from player's perspective) - (eval after move from player's perspective)
-    const actual_cpl = Math.round((cpBefore * turnMultiplier) - (cpAfterPlayed * turnMultiplier));
-
+    const cpBefore = evalToCp(evalBeforeMove, color);
+    const cpAfter = evalToCp(evalAfterPlayed, color);
+    const cpl = (cpBefore - cpAfter) * ((color === 'w') ? 1 : -1);
     if (moveAnalysisData[dataIndexAfter]) {
-        moveAnalysisData[dataIndexAfter].cpl = actual_cpl;
+        moveAnalysisData[dataIndexAfter].cpl = cpl;
     }
 
-    const playedMoveUCI  = playedMove.from + playedMove.to + (playedMove.promotion || '');
-    const bestMoveBefore = analysisBefore?.best_move_before; // Engine's best move for the position *before* playedMove
-
-    // --- Classification Logic ---
-    const CPL_TO_EP_DIVISOR = 1000.0; // 1000 CPL = 1.0 EP Lost
-    const EP_LOST_EXCELLENT_UPPER = 0.02; // CPL <= 20
-    const EP_LOST_GOOD_UPPER = 0.05;      // CPL <= 50
-    const EP_LOST_INACCURACY_UPPER = 0.10; // CPL <= 100
-    const EP_LOST_MISTAKE_UPPER = 0.20;   // CPL <= 200
-
-    const WINNING_THRESHOLD_CP = 200;     // Approx +2.00
-    const LOSING_THRESHOLD_CP = -200;    // Approx -2.00
-    const EQUAL_ISH_MAX_ABS_CP = 50;      // Approx +/- 0.50
-    const GOOD_POS_THRESHOLD_CP = -50;    // Better than -0.50 (from player's perspective)
-    const BRILLIANT_MOVE_MAX_CPL = 5;     // Max CPL for a "Brilliant" best move
-
-    const ep_lost = Math.min(1.0, Math.max(0, actual_cpl) / CPL_TO_EP_DIVISOR);
-    let classification;
-
-    // 1. Determine base classification from EP_LOST (CPL)
-    if (actual_cpl <= 0) {
+    // --- Chess.com V2 Table ---
+    // Best: 0.00
+    // Excellent: 0.00 < x <= 0.02
+    // Good: 0.02 < x <= 0.05
+    // Inaccuracy: 0.05 < x <= 0.10
+    // Mistake: 0.10 < x <= 0.20
+    // Blunder: 0.20 < x
+    let classification = null;
+    if (Math.abs(epLost) < 1e-6) {
         classification = "Meilleur";
-    } else if (ep_lost <= EP_LOST_EXCELLENT_UPPER) {
+    } else if (epLost <= 0.02) {
         classification = "Excellent";
-    } else if (ep_lost <= EP_LOST_GOOD_UPPER) {
+    } else if (epLost <= 0.05) {
         classification = "Bon";
-    } else if (ep_lost <= EP_LOST_INACCURACY_UPPER) {
+    } else if (epLost <= 0.10) {
         classification = "Imprécision";
-    } else if (ep_lost <= EP_LOST_MISTAKE_UPPER) {
+    } else if (epLost <= 0.20) {
         classification = "Erreur";
-    } else { // ep_lost > EP_LOST_MISTAKE_UPPER
+    } else {
         classification = "Gaffe";
     }
 
-    // 2. Check for "Miss" (Manqué)
-    const wasPlayerWinning = cpBefore * turnMultiplier >= WINNING_THRESHOLD_CP;
-    if (wasPlayerWinning && (classification === "Erreur" || classification === "Gaffe")) {
+    // --- Special Classifications (Great, Brilliant, Miss) ---
+
+    // Miss: You had a winning position (epBefore >= 0.90), but after your move, it's not winning anymore (epAfter < 0.90)
+    if (epBefore >= 0.90 && epAfter < 0.90 && (classification === "Erreur" || classification === "Gaffe")) {
         classification = "Manqué";
     }
 
-    // 3. Check for "Great Move" (Très bon) - Can upgrade Meilleur, Excellent, Bon
-    //    (Only if not already a "Manqué")
-    if (classification !== "Manqué" && (classification === "Meilleur" || classification === "Excellent" || classification === "Bon")) {
-        const playerEvalBefore = cpBefore * turnMultiplier;
-        const playerEvalAfter = cpAfterPlayed * turnMultiplier;
-
-        const turnedLosingToGood = playerEvalBefore <= LOSING_THRESHOLD_CP && playerEvalAfter >= GOOD_POS_THRESHOLD_CP;
-        const turnedEqualToWinning = Math.abs(playerEvalBefore) <= EQUAL_ISH_MAX_ABS_CP && playerEvalAfter >= WINNING_THRESHOLD_CP;
-
-        if (turnedLosingToGood || turnedEqualToWinning) {
-            classification = "Très bon";
-        }
+    // Great Move: Turned a losing position into equal or better (epBefore <= 0.10 && epAfter >= 0.40)
+    // Or turned equal into winning (epBefore between 0.40 and 0.60, epAfter >= 0.90)
+    // Or only move that keeps the game (played the only move with epLost <= 0.02, all others lose much more)
+    // For simplicity, we check the first two.
+    if (
+        (classification === "Meilleur" || classification === "Excellent" || classification === "Bon") &&
+        (
+            (epBefore <= 0.10 && epAfter >= 0.40) ||
+            (epBefore >= 0.40 && epBefore <= 0.60 && epAfter >= 0.90)
+        )
+    ) {
+        classification = "Très bon";
     }
 
-    // 4. Check for "Brilliant" (Brillant) - Can upgrade Meilleur or Très bon
-    //    Simplified: An exceptionally strong best move with high impact.
+    // Brilliant: Piece sacrifice that is best or nearly best, not already winning, and not a forced mate before
+    // For simplicity, detect a piece sacrifice (non-pawn, non-checkmate, non-winning before, best move, and a capture of minor/major piece)
+    // Only for "Meilleur" or "Très bon"
     if (classification === "Meilleur" || classification === "Très bon") {
-        const isPlayedTheBest = (bestMoveBefore && playedMoveUCI === bestMoveBefore);
-        const leadsToForcedMate = (typeof evalAfterPlayed === 'string' && evalAfterPlayed.startsWith('M') && (evalAfterPlayed.substring(1) * turnMultiplier > 0));
-        const wasNotForcedMateBefore = !(typeof evalBeforeMove === 'string' && evalBeforeMove.startsWith('M') && (evalBeforeMove.substring(1) * turnMultiplier > 0));
-        const notDecisivelyWinningBefore = cpBefore * turnMultiplier < WINNING_THRESHOLD_CP;
-        const nowDecisivelyWinningAfter = cpAfterPlayed * turnMultiplier >= (WINNING_THRESHOLD_CP + 100); // e.g. > +3 from player's view
-
-        if (isPlayedTheBest && actual_cpl <= BRILLIANT_MOVE_MAX_CPL) {
-            if (leadsToForcedMate && wasNotForcedMateBefore) {
-                classification = "Brillant"; // Found a new mate
-            } else if (notDecisivelyWinningBefore && nowDecisivelyWinningAfter && !leadsToForcedMate) {
-                classification = "Brillant"; // Created a decisive advantage from non-decisive
-            }
+        // Is it a piece sacrifice? (captured piece is not a pawn, and the moving piece is not a pawn)
+        const isCapture = playedMove.captured && playedMove.captured.toLowerCase() !== 'p';
+        const isSacrifice = isCapture && playedMove.piece && playedMove.piece.toLowerCase() !== 'p';
+        // Is it the best move?
+        const bestMoveBefore = analysisBefore?.best_move_before;
+        const isBest = bestMoveBefore && playedMoveUCI === bestMoveBefore.toLowerCase();
+        // Not already winning before
+        const notWinningBefore = epBefore < 0.90;
+        // Not a forced mate before
+        const notMateBefore = !(typeof evalBeforeMove === "string" && evalBeforeMove.startsWith("M"));
+        // After move, not losing
+        const notLosingAfter = epAfter > 0.10;
+        if (isSacrifice && isBest && notWinningBefore && notMateBefore && notLosingAfter) {
+            classification = "Brillant";
         }
     }
 
     if (moveAnalysisData[dataIndexAfter]) {
         moveAnalysisData[dataIndexAfter].classification = classification;
-    } else {
-        console.error("Cannot store classification, data entry missing for index", dataIndexAfter);
-        return; // Should not happen if logic is correct
     }
 
     updateMoveListClassification(moveIndex, classification);
-    console.log(`Classified move ${moveIndex + 1} (${playedMove.san}): ${classification} (CPL: ${actual_cpl}, EP_lost: ${ep_lost.toFixed(3)})`);
+    // Optionally log: console.log(`Classified move ${moveIndex + 1} (${playedMove.san}): ${classification} (EP lost: ${epLost.toFixed(3)})`);
 }
+
+// --- Move Commentary (Classification Explanation) ---
+
+function getClassificationExplanation(classification, moveIndex) {
+    if (!classification) return "Aucune explication disponible pour ce coup.";
+
+    const move = fullGameHistory[moveIndex];
+    const analysisBefore = moveAnalysisData[moveIndex]; // Analysis of the position *before* this move
+    const analysisAfter = moveAnalysisData[moveIndex + 1]; // Analysis of the position *after* this move
+    const bestMoveUci = analysisBefore?.best_move_before; // Best move from the position *before* this move
+    const playedMoveUCI = move?.from + move?.to + (move?.promotion || '');
+
+    const san = move?.san || '';
+    let scoreText = "";
+    // Use the evaluation *after* the current move for the score display
+    const evalToDisplay = analysisAfter?.eval_before; 
+    if (typeof evalToDisplay === "number") {
+        scoreText = (evalToDisplay > 0 ? "+" : "") + evalToDisplay.toFixed(2);
+    } else if (typeof evalToDisplay === "string" && evalToDisplay.startsWith("M")) {
+        scoreText = "#" + evalToDisplay.substring(1);
+    }
+
+    function getBestMoveSan() {
+        if (bestMoveUci && playedMoveUCI.toLowerCase() !== bestMoveUci.toLowerCase()) {
+            try {
+                // Use the FEN *before* the current move to get SAN for the best alternative
+                const tempGame = new Chess(analysisBefore.fen_after); 
+                return tempGame.move(bestMoveUci, { sloppy: true })?.san || bestMoveUci;
+            } catch {
+                return bestMoveUci;
+            }
+        }
+        return "";
+    }
+
+    function isPieceLeftHanging() {
+        if (!move || !analysisBefore?.fen_after) return false;
+        const tempGame = new Chess(analysisBefore.fen_after); // Board state *before* the played move
+        const moveResult = tempGame.move(move.san, { sloppy: true }); // Apply the played move
+        if (!moveResult) return false; // Should not happen if move is from history
+
+        const color = move.color;
+        const oppColor = color === 'w' ? 'b' : 'w';
+        const board = tempGame.board();
+
+        for (let r = 0; r < 8; r++) {
+            for (let c = 0; c < 8; c++) {
+                const sqData = board[r][c];
+                if (sqData && sqData.color === color && sqData.type !== 'k' && sqData.type !== 'p') {
+                    const alg = files[c] + (8 - r);
+                    if (tempGame.isAttacked(alg, oppColor) && !tempGame.isAttacked(alg, color)) {
+                        return true; // Piece is attacked by opponent and not defended by player
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    let explanation = "";
+    const bestSan = getBestMoveSan();
+
+    switch (classification) {
+        case "Théorique":
+            explanation = `${san} est un coup d'ouverture théorique (${scoreText}). `;
+            if (moveIndex === 0) {
+                explanation += "Ce coup est un standard pour débuter la partie, visant le contrôle du centre et un développement harmonieux.";
+            } else {
+                const nextClass = moveAnalysisData[moveIndex + 2]?.classification;
+                if (nextClass !== "Théorique") {
+                    explanation += "C'est le dernier coup connu de la théorie dans cette variante. La partie entre maintenant en territoire moins exploré.";
+                } else {
+                    explanation += "Il suit les lignes principales, contribuant à une structure solide et préparant les plans de milieu de jeu.";
+                }
+            }
+            break;
+        case "Meilleur":
+            explanation = `${san} est le meilleur coup (${scoreText}). `;
+            let onlyMove = false;
+            if (analysisBefore?.pv && Array.isArray(analysisBefore.pv) && analysisBefore.pv.length === 1) {
+                 onlyMove = true; // Simplified check, assumes if only one line in PV it's critical
+            }
+            if (onlyMove) {
+                explanation += "C'est une ressource précise, souvent la seule pour maintenir l'équilibre ou l'avantage !";
+            } else {
+                explanation += "Il maximise les chances et maintient la position à son potentiel optimal.";
+            }
+            break;
+        case "Brillant":
+            explanation = `${san} est un coup brillant (${scoreText}) ! Ce coup surprenant, souvent un sacrifice ou une manœuvre subtile, change la dynamique de la position de manière spectaculaire. Une trouvaille difficile !`;
+            break;
+        case "Très bon":
+            explanation = `${san} est un très bon coup (${scoreText}). Il améliore significativement votre position, peut-être en exploitant une faiblesse adverse ou en consolidant la vôtre avec force.`;
+            break;
+        case "Excellent":
+            explanation = `${san} est un excellent coup (${scoreText}). Presque aussi fort que la recommandation principale de l'ordinateur, ce coup maintient la qualité de la position avec une différence d'évaluation minime.`;
+            break;
+        case "Bon":
+            explanation = `${san} est un bon coup (${scoreText}). C'est un choix solide et logique qui ne compromet pas la position, même si une alternative légèrement plus incisive était peut-être disponible.`;
+            break;
+        case "Imprécision":
+            explanation = `${san} est une imprécision (${scoreText}). Ce coup n'est pas optimal et laisse échapper une meilleure opportunité. `;
+            if (bestSan) {
+                explanation += `L'ordinateur suggérait ${bestSan} pour maintenir une pression plus forte ou obtenir un avantage plus tangible.`;
+            }
+            if (isPieceLeftHanging()) {
+                explanation += `\nAttention : une pièce a été laissée sans défense et pourrait être capturée gratuitement.`;
+            }
+            break;
+        case "Erreur":
+            explanation = `${san} est une erreur (${scoreText}). Ce coup détériore sensiblement votre position. `;
+            if (bestSan) {
+                explanation += `Il fallait envisager ${bestSan} pour éviter des complications ou une perte matérielle.`;
+            }
+            if (isPieceLeftHanging()) {
+                explanation += `\nDe plus, vous avez malheureusement laissé une pièce en prise sans compensation suffisante.`;
+            }
+            break;
+        case "Manqué":
+            explanation = `${san} est un coup manqué (${scoreText}). Une opportunité de prendre un avantage significatif, voire décisif, a été ratée. `;
+            if (bestSan) {
+                explanation += `Avec ${bestSan}, la partie aurait pu prendre une tournure bien plus favorable. L'adversaire peut maintenant se réorganiser.`;
+            }
+            if (isPieceLeftHanging()) {
+                explanation += `\nLaisser une pièce en prise dans une telle situation est particulièrement coûteux et annule vos chances précédentes.`;
+            }
+            break;
+        case "Gaffe":
+            explanation = `${san} est une gaffe (${scoreText}) ! Ce coup a de lourdes conséquences et compromet sérieusement l'issue de la partie, menant souvent à une perte matérielle décisive ou à une position intenable. `;
+            if (bestSan) {
+                explanation += `L'alternative ${bestSan} était nécessaire pour rester dans la partie.`;
+            }
+            if (isPieceLeftHanging()) {
+                explanation += `\nLaisser une pièce majeure en prise comme cela est généralement synonyme de défaite imminente.`;
+            }
+            break;
+        default:
+            explanation = `${san} (${scoreText}). Aucune explication spécifique pour cette classification.`;
+            break;
+    }
+    return explanation;
+}
+// ...existing code...
+
+function updateMoveCommentary(moveIndex) {
+    const commentaryEl = document.getElementById('move-commentary');
+    if (!commentaryEl) return;
+
+    if (moveIndex < 0 || moveIndex >= fullGameHistory.length) {
+        commentaryEl.textContent = "Sélectionnez un coup pour voir une explication sur sa classification.";
+        return;
+    }
+
+    const analysis = moveAnalysisData[moveIndex + 1];
+    const classification = analysis?.classification;
+    if (!classification) {
+        commentaryEl.textContent = "Ce coup n'a pas encore été analysé ou classifié.";
+        return;
+    }
+
+    const explanation = getClassificationExplanation(classification, moveIndex);
+    commentaryEl.innerHTML = `<b>Classification :</b> ${classification}<br><span style="opacity:0.85;">${explanation}</span>`;
+}
+
+// --- Hook commentary update into navigation and move selection ---
+
+// Update commentary when navigating moves
+const originalGoToMove = goToMove;
+goToMove = function(index) {
+    originalGoToMove(index);
+    updateMoveCommentary(index);
+};
+
+// Update commentary when clicking in move list
+function patchMoveListForCommentary() {
+    if (!moveListEl) return;
+    moveListEl.querySelectorAll('li').forEach(li => {
+        li.addEventListener('click', () => {
+            const idx = parseInt(li.dataset.moveIndex);
+            updateMoveCommentary(idx);
+        });
+    });
+}
+
+// Patch after building move list
+const originalBuildMoveListUI = buildMoveListUI;
+buildMoveListUI = function() {
+    originalBuildMoveListUI();
+    patchMoveListForCommentary();
+};
+
+// Initial commentary on page load
+document.addEventListener('DOMContentLoaded', () => {
+    updateMoveCommentary(currentMoveIndex);
+});
 
 // --- Stockfish Analysis Orchestration ---
 
