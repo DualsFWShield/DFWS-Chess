@@ -1849,344 +1849,368 @@ function classifyMove(moveIndex) {
  * Utilise des phrases concrètes sur les occasions manquées ou les pièces en prise.
  * Limité à 3 lignes, sans superflu.
  */
-function getClassificationExplanation(classification, moveIndex) {
+// --- Supposons quelques constantes et utilitaires ---
+const PIECE_NAMES_FR = {
+    'p': 'pion', 'n': 'cavalier', 'b': 'fou', 'r': 'tour', 'q': 'dame', 'k': 'roi'
+};
+const PIECE_NAMES_FR_FEMININE = { // Pour "votre dame", "une tour"
+    'p': 'pion', 'n': 'cavalier', 'b': 'fou', 'r': 'tour', 'q': 'dame', 'k': 'roi'
+};
+const ARTICLE_PIECE_FR = { // "un pion", "une dame"
+    'p': 'un', 'n': 'un', 'b': 'un', 'r': 'une', 'q': 'une', 'k': 'un'
+};
+
+// Fonction utilitaire pour convertir l'évaluation en texte (plus robuste)
+function formatEvaluation(evalValue, forPlayerColor = 'w') {
+    if (typeof evalValue === 'number') {
+        // L'évaluation est toujours du point de vue des Blancs.
+        // Si c'est au tour des Noirs de jouer et que l'eval est pour les Noirs, on l'inverse.
+        const sign = (forPlayerColor === 'w') ? 1 : -1;
+        const displayEval = evalValue * sign;
+        return (displayEval > 0 ? "+" : "") + displayEval.toFixed(2);
+    } else if (typeof evalValue === 'string' && evalValue.startsWith("M")) {
+        const mateIn = parseInt(evalValue.substring(1));
+        if (mateIn > 0 && forPlayerColor === 'b') return "#" + (-mateIn); // Mate pour les noirs, affiché négativement
+        if (mateIn < 0 && forPlayerColor === 'w') return "#" + mateIn; // Mate pour les blancs (par les noirs), affiché négativement
+        return "#" + mateIn; // Mate pour les blancs, ou mat pour les noirs si eval est déjà inversée
+    }
+    return "";
+}
+
+
+/**
+ * Fournit une explication concise et précise pour la classification d'un coup,
+ * en s'appuyant sur l'analyse Stockfish et la logique de classifymove.
+ * Utilise des phrases concrètes sur les occasions manquées ou les pièces en prise.
+ * Limité à 3 lignes, sans superflu.
+ * 
+ * NOTE: Cette version utilise les variables globales fullGameHistory et moveAnalysisData
+ * si elles ne sont pas passées explicitement (pour compatibilité avec l'appel dans updateMoveCommentary).
+ */
+function getClassificationExplanation(classification, moveIndex, fullGameHistoryArg, moveAnalysisDataArg) {
+    // Utilise les arguments si fournis, sinon les variables globales
+    const gameHistory = fullGameHistoryArg || fullGameHistory;
+    const analysisData = moveAnalysisDataArg || moveAnalysisData;
+
     if (!classification) return "Aucune explication disponible pour ce coup.";
 
-    const move = fullGameHistory[moveIndex];
-    const analysisBefore = moveAnalysisData[moveIndex];
-    const analysisAfter = moveAnalysisData[moveIndex + 1];
-    const bestMoveUci = analysisBefore?.best_move_before;
-    const playedMoveUCI = move?.from + move?.to + (move?.promotion || '');
-    const san = move?.san || '';
-    let scoreText = "";
-    const evalToDisplay = analysisAfter?.eval_before;
-    if (typeof evalToDisplay === "number") {
-        scoreText = (evalToDisplay > 0 ? "+" : "") + evalToDisplay.toFixed(2);
-    } else if (typeof evalToDisplay === "string" && evalToDisplay.startsWith("M")) {
-        scoreText = "#" + evalToDisplay.substring(1);
+    const currentMoveData = gameHistory[moveIndex];
+    if (!currentMoveData) return "Données du coup manquantes.";
+
+    // analysisBeforeMove: analyse de la position AVANT que currentMoveData ne soit joué
+    const analysisBeforeMove = analysisData[moveIndex];
+    // analysisAfterMove: analyse de la position APRES que currentMoveData ait été joué
+    const analysisAfterMove = analysisData[moveIndex + 1];
+
+    if (!analysisBeforeMove || !analysisAfterMove) return "Données d'analyse manquantes pour ce coup.";
+
+    const playedMoveUCI = currentMoveData.from + currentMoveData.to + (currentMoveData.promotion || '');
+    const san = currentMoveData.san || playedMoveUCI;
+    const playerColor = currentMoveData.color;
+
+    // Évaluation de la position actuelle (après le coup joué)
+    const currentEval = analysisAfterMove.eval_before; // eval_before de l'analyse suivante est l'eval APRES le coup courant
+    const scoreText = formatEvaluation(currentEval, playerColor);
+
+    // Contexte du coup pour les fonctions d'aide
+    const moveContext = {
+        moveData: currentMoveData,
+        playedMoveUCI: playedMoveUCI,
+        san: san,
+        playerColor: playerColor,
+        opponentColor: playerColor === 'w' ? 'b' : 'w',
+        fenBeforePlay: analysisBeforeMove.fen_after, // FEN de la position où le coup a été joué
+        fenAfterPlay: analysisAfterMove.fen_after,   // FEN après le coup joué
+        boardBeforePlay: null, // Sera initialisé avec new Chess()
+        boardAfterPlay: null,  // Sera initialisé avec new Chess()
+        bestMoveUciBefore: analysisBeforeMove.best_move_before,
+        evalBeforePlay: analysisBeforeMove.eval_before,                 // Eval de la position avant le coup du joueur
+        evalAfterPlay: analysisAfterMove.eval_before,                   // Eval de la position après le coup du joueur
+        evalIfBestMovePlayed: analysisBeforeMove.eval_after_best_move_if_played, // Eval si le meilleur coup avait été joué
+        bestMoveSan: "",
+        classification: classification,
+        scoreText: scoreText,
+        moveIndex: moveIndex
+    };
+
+    try {
+        moveContext.boardBeforePlay = new Chess(moveContext.fenBeforePlay);
+        moveContext.boardAfterPlay = new Chess(moveContext.fenAfterPlay);
+    } catch (e) {
+        console.error("Erreur initialisation Chess.js:", e, moveContext.fenBeforePlay, moveContext.fenAfterPlay);
+        return "Erreur d'analyse de la position.";
     }
 
-    function getBestMoveSan() {
-        if (bestMoveUci && playedMoveUCI.toLowerCase() !== bestMoveUci.toLowerCase()) {
-            try {
-                const tempGame = new Chess(analysisBefore.fen_after);
-                return tempGame.move(bestMoveUci, { sloppy: true })?.san || bestMoveUci;
-            } catch {
-                return bestMoveUci;
-            }
-        }
-        return "";
-    }
-
-    function getHangingPiecePhrase() {
-        if (!move || !analysisBefore?.fen_after) return "";
-        const tempGame = new Chess(analysisBefore.fen_after);
-        const moveResult = tempGame.move(move.san, { sloppy: true });
-        if (!moveResult) return "";
-        const color = move.color;
-        const oppColor = color === 'w' ? 'b' : 'w';
-        const board = tempGame.board();
-        let phrases = [];
-        for (let r = 0; r < 8; r++) {
-            for (let c = 0; c < 8; c++) {
-                const sqData = board[r][c];
-                if (sqData && sqData.color === color && sqData.type !== 'k') {
-                    const alg = files[c] + (8 - r);
-                    if (typeof tempGame.isAttacked === "function" && tempGame.isAttacked(alg, oppColor)) {
-                        switch (sqData.type) {
-                            case 'q': phrases.push("Vous avez laissé votre dame en prise."); break;
-                            case 'r': phrases.push("Vous avez laissé une tour en prise."); break;
-                            case 'b': phrases.push("Vous avez laissé un fou en prise."); break;
-                            case 'n': phrases.push("Vous avez laissé un cavalier en prise."); break;
-                            case 'p': phrases.push("Vous avez laissé un pion en prise."); break;
-                        }
-                    }
-                }
-            }
-        }
-        return [...new Set(phrases)].join(" ");
-    }
-
-    function getMissedOpportunityPhrase() {
-        if (!move || !analysisBefore?.fen_after || !bestMoveUci) return "";
-        const tempGame = new Chess(analysisBefore.fen_after);
-        const bestMove = tempGame.move(bestMoveUci, { sloppy: true });
-        if (!bestMove) return "";
-        if (bestMove.captured) {
-            switch (bestMove.captured.toLowerCase()) {
-                case 'q': return "Vous avez laissé passer une occasion de capturer la dame adverse gratuitement.";
-                case 'r': return "Vous avez laissé passer une occasion de capturer une tour gratuite.";
-                case 'b': return "Vous avez laissé passer une occasion de capturer un fou gratuit.";
-                case 'n': return "Vous avez laissé passer une occasion de capturer un cavalier gratuit.";
-                case 'p': return "Vous avez laissé passer une occasion de gagner un pion gratuit.";
-            }
-        }
-        if (typeof analysisBefore.eval_before === "string" && analysisBefore.eval_before.startsWith("M")) {
-            return "Vous aviez une occasion de mater votre adversaire.";
-        }
-        if (typeof analysisAfter.eval_before === "number" && analysisAfter.eval_before > 1.5) {
-            return "Vous avez laissé passer une occasion de gagner un avantage décisif.";
-        }
-        return "";
-    }
-
-    function getCongratsForFreeCapture() {
-        if (!move || !move.captured) return "";
-        // Check if the captured piece was not defended (free piece)
-        const tempGame = new Chess(analysisBefore.fen_after);
-        // Simulate the move to get to the position after the move
-        const moveResult = tempGame.move(move.san, { sloppy: true });
-        if (!moveResult) return "";
-        // The captured piece was on move.to
-        const oppColor = move.color === 'w' ? 'b' : 'w';
-        // In the position before the move, check if the captured piece was defended
-        const tempGameBefore = new Chess(analysisBefore.fen_after);
-        // Use getSquaresAttackedBy to see if the captured square was defended
-        const defenders = getSquaresAttackedBy(analysisBefore.fen_after, oppColor);
-        if (!defenders.has(move.to)) {
-            switch (move.captured.toLowerCase()) {
-                case 'q': return "Bravo, vous avez capturé la dame adverse gratuitement !";
-                case 'r': return "Bravo, vous avez capturé une tour gratuite !";
-                case 'b': return "Bravo, vous avez capturé un fou gratuit !";
-                case 'n': return "Bravo, vous avez capturé un cavalier gratuit !";
-                case 'p': return "Bravo, vous avez gagné un pion gratuit !";
-            }
-        }
-        return "";
-    }
-
-    // --- New: Piece activation and missed opportunity to chase away a piece ---
-
-    function isPieceDeveloped(move) {
-        if (!move || !move.piece) return false;
-        const piece = move.piece.toLowerCase();
-        const from = move.from;
-        if (piece === 'b') {
-            if ((move.color === 'w' && (from === 'c1' || from === 'f1')) ||
-                (move.color === 'b' && (from === 'c8' || from === 'f8'))) {
-                return true;
-            }
-        }
-        if (piece === 'n') {
-            if ((move.color === 'w' && (from === 'b1' || from === 'g1')) ||
-                (move.color === 'b' && (from === 'b8' || from === 'g8'))) {
-                return true;
-            }
-        }
-        if (piece === 'r') {
-            if ((move.color === 'w' && (from === 'a1' || from === 'h1')) ||
-                (move.color === 'b' && (from === 'a8' || from === 'h8'))) {
-                return true;
-            }
-        }
-        if (piece === 'q') {
-            if ((move.color === 'w' && from === 'd1') || (move.color === 'b' && from === 'd8')) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    function getPieceActivationPhrase() {
-        if (!move) return "";
-        if (isPieceDeveloped(move)) {
-            switch (move.piece.toLowerCase()) {
-                case 'b': return "Vous activez votre fou en le sortant de sa case de départ.";
-                case 'n': return "Vous développez votre cavalier vers une case plus active.";
-                case 'r': return "Vous activez votre tour en la sortant de la première rangée.";
-                case 'q': return "Vous activez votre dame en la sortant de sa case de départ.";
-            }
-        }
-        // Also, if a piece moves to a more central or aggressive square (not just from initial square)
-        if (move.piece && ['b', 'n', 'r', 'q'].includes(move.piece.toLowerCase())) {
-            const fromCoord = algToCoord(move.from);
-            const toCoord = algToCoord(move.to);
-            if (fromCoord && toCoord) {
-                // Manhattan distance to center (3.5,3.5)
-                function distToCenter([r, c]) {
-                    return Math.abs(r - 3.5) + Math.abs(c - 3.5);
-                }
-                if (distToCenter(toCoord) < distToCenter(fromCoord)) {
-                    return "L’activation de votre " +
-                        (move.piece.toLowerCase() === 'b' ? "fou" :
-                         move.piece.toLowerCase() === 'n' ? "cavalier" :
-                         move.piece.toLowerCase() === 'r' ? "tour" : "dame") +
-                        " est un bon coup de développement.";
-                }
-            }
-        }
-        // New: congratulate if moving a piece allows another piece to be activated (unblocks a piece)
-        // For example, moving a pawn that frees a bishop or queen, or moving a knight that unblocks a rook.
-        // We'll check if after the move, a friendly piece that was blocked can now move.
+    // Calculer le SAN du meilleur coup
+    if (moveContext.bestMoveUciBefore) {
         try {
-            const before = new Chess(analysisBefore.fen_after);
-            const after = new Chess(analysisAfter.fen_after);
-            // For each friendly piece (not the moved one), if it had no legal moves before and has at least one after, and is now unblocked
-            const color = move.color;
-            const filesArr = files;
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    const sqAlg = filesArr[c] + (8 - r);
-                    if (sqAlg === move.from || sqAlg === move.to) continue;
-                    const pieceBefore = before.get(sqAlg);
-                    const pieceAfter = after.get(sqAlg);
-                    if (pieceBefore && pieceAfter && pieceBefore.color === color && pieceAfter.color === color && pieceBefore.type === pieceAfter.type) {
-                        const movesBefore = before.moves({ square: sqAlg, verbose: true });
-                        const movesAfter = after.moves({ square: sqAlg, verbose: true });
-                        if (movesBefore.length === 0 && movesAfter.length > 0) {
-                            // Only congratulate for minor/major pieces, not pawns or king
-                            if (['b', 'n', 'r', 'q'].includes(pieceBefore.type)) {
-                                switch (pieceBefore.type) {
-                                    case 'b': return "Bravo, ce coup libère votre fou et lui permet d’entrer en jeu.";
-                                    case 'n': return "Bravo, ce coup libère votre cavalier et lui permet d’entrer en jeu.";
-                                    case 'r': return "Bravo, ce coup libère votre tour et lui permet d’entrer en jeu.";
-                                    case 'q': return "Bravo, ce coup libère votre dame et lui permet d’entrer en jeu.";
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (e) {}
-        return "";
+            const tempGame = new Chess(moveContext.fenBeforePlay);
+            const bestMoveObj = tempGame.move(moveContext.bestMoveUciBefore, { sloppy: true });
+            moveContext.bestMoveSan = bestMoveObj ? bestMoveObj.san : moveContext.bestMoveUciBefore;
+        } catch {
+            moveContext.bestMoveSan = moveContext.bestMoveUciBefore;
+        }
     }
 
-    function missedOpportunityToChasePiece(move, analysisBefore) {
-        if (!move || !analysisBefore) return false;
-        if (move.piece.toLowerCase() !== 'p') return false;
-        const to = move.to;
-        const squares = ['g6', 'h6', 'b6', 'a6', 'f6', 'e6', 'd6', 'c6', 'g3', 'h3', 'b3', 'a3', 'f3', 'e3', 'd3', 'c3'];
-        if (!squares.includes(to)) return false;
-        const oppColor = move.color === 'w' ? 'b' : 'w';
-        const board = new Chess(analysisBefore.fen_after).board();
-        const targetRow = move.color === 'w' ? 4 : 3; // row 4 (index 4) for white, 3 for black
-        for (let c = 0; c < 8; c++) {
-            const sq = board[targetRow][c];
-            if (sq && sq.color === oppColor && (sq.type === 'b' || sq.type === 'n')) {
-                return true;
-            }
+    // --- Fonctions d'aide améliorées ---
+
+    function getPieceName(pieceChar, feminine = false, article = false) {
+        const type = pieceChar.toLowerCase();
+        let name = feminine ? PIECE_NAMES_FR_FEMININE[type] : PIECE_NAMES_FR[type];
+        if (article && name) {
+            name = ARTICLE_PIECE_FR[type] + " " + name;
         }
-        return false;
+        return name || "pièce";
     }
 
-    function getMissedChasePhrase() {
-        if (missedOpportunityToChasePiece(move, analysisBefore)) {
-            // Try to detect which piece could be chased
-            const oppColor = move.color === 'w' ? 'b' : 'w';
-            const board = new Chess(analysisBefore.fen_after).board();
-            const targetRow = move.color === 'w' ? 4 : 3;
-            for (let c = 0; c < 8; c++) {
-                const sq = board[targetRow][c];
-                if (sq && sq.color === oppColor) {
-                    switch (sq.type) {
-                        case 'b': return "Ce coup laisse passer l’occasion de repousser un fou adverse.";
-                        case 'n': return "Ce coup laisse passer l’occasion de repousser un cavalier adverse.";
-                        case 'q': return "Ce coup laisse passer l’occasion de repousser la dame adverse.";
-                        case 'r': return "Ce coup laisse passer l’occasion de repousser une tour adverse.";
-                        case 'p': return "Ce coup laisse passer l’occasion de repousser un pion adverse.";
+    function getLostMaterialBlunderPhrase(ctx) {
+        if (!ctx.moveData.captured &&
+            (ctx.classification === "Gaffe" || ctx.classification === "Erreur")) {
+            // Vérifier si le MEILLEUR coup était une capture importante que l'on a ratée
+            if (ctx.bestMoveUciBefore) {
+                const tempGame = new Chess(ctx.fenBeforePlay);
+                const bestMoveObj = tempGame.move(ctx.bestMoveUciBefore, { sloppy: true });
+                if (bestMoveObj && bestMoveObj.captured) {
+                    const capturedPieceType = bestMoveObj.captured.toLowerCase();
+                    if (['q', 'r'].includes(capturedPieceType)) {
+                        return `Vous avez raté ${ctx.bestMoveSan}, qui capturait ${getPieceName(capturedPieceType, true, true)} adverse.`;
                     }
                 }
             }
-            return "Ce coup laisse passer l’occasion de repousser une pièce adverse.";
-        }
-        // Félicite si le coup repousse une pièce adverse
-        // On vérifie si le coup attaque une pièce adverse sur la case d'arrivée
-        if (move && move.piece && move.piece.toLowerCase() === 'p') {
-            const toCoord = algToCoord(move.to);
-            if (toCoord) {
-                const oppColor = move.color === 'w' ? 'b' : 'w';
-                const board = new Chess(analysisBefore.fen_before).board();
-                // Vérifie si une pièce adverse était sur une case attaquée par ce pion
-                // Pour un pion, les captures sont déjà félicitées ailleurs, ici on félicite si le pion attaque une pièce sans la capturer
-                const attackOffsets = move.color === 'w' ? [[-1, -1], [-1, 1]] : [[1, -1], [1, 1]];
-                for (const [dr, dc] of attackOffsets) {
-                    const r = toCoord[0] + dr;
-                    const c = toCoord[1] + dc;
-                    if (r >= 0 && r < 8 && c >= 0 && c < 8) {
-                        const sq = board[r][c];
-                        if (sq && sq.color === oppColor && (sq.type === 'b' || sq.type === 'n' || sq.type === 'q' || sq.type === 'r')) {
-                            switch (sq.type) {
-                                case 'b': return "Bravo, vous repoussez un fou adverse avec ce coup.";
-                                case 'n': return "Bravo, vous repoussez un cavalier adverse avec ce coup.";
-                                case 'q': return "Bravo, vous repoussez la dame adverse avec ce coup.";
-                                case 'r': return "Bravo, vous repoussez une tour adverse avec ce coup.";
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // Pour les autres pièces, félicite si le coup attaque une pièce adverse (hors capture)
-        if (move && move.piece && move.piece.toLowerCase() !== 'p') {
-            const toAlg = move.to;
-            const oppColor = move.color === 'w' ? 'b' : 'w';
-            const board = new Chess(analysisBefore.fen_before).board();
-            // Vérifie si une pièce adverse est attaquée depuis la case d'arrivée
-            const tempGame = new Chess(analysisBefore.fen_after);
-            const attackedSquares = getSquaresAttackedBy(tempGame.fen(), move.color);
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    const sq = board[r][c];
-                    const alg = files[c] + (8 - r);
-                    if (sq && sq.color === oppColor && attackedSquares.has(alg) && !move.captured) {
-                        switch (sq.type) {
-                            case 'b': return "Bravo, vous repoussez un fou adverse avec ce coup.";
-                            case 'n': return "Bravo, vous repoussez un cavalier adverse avec ce coup.";
-                            case 'q': return "Bravo, vous repoussez la dame adverse avec ce coup.";
-                            case 'r': return "Bravo, vous repoussez une tour adverse avec ce coup.";
-                        }
-                    }
-                }
-            }
+            // Vérifier si le coup joué laisse une pièce en prise non défendue
+            // (Simplifié: on ne fait pas cette vérification ici, car chess.js vanilla ne fournit pas isAttacked/attackers)
         }
         return "";
     }
 
+    function getMissedOpportunityPhrase(ctx) {
+        if (ctx.playedMoveUCI.toLowerCase() === ctx.bestMoveUciBefore?.toLowerCase()) return "";
+
+        const evalDrop = calculateEvalDrop(ctx.evalIfBestMovePlayed, ctx.evalAfterPlay, ctx.playerColor);
+
+        if (ctx.bestMoveUciBefore) {
+            const tempGame = new Chess(ctx.fenBeforePlay);
+            const bestMoveObj = tempGame.move(ctx.bestMoveUciBefore, { sloppy: true });
+
+            if (bestMoveObj) {
+                // Occasion de mat manquée
+                if (typeof ctx.evalIfBestMovePlayed === 'string' && ctx.evalIfBestMovePlayed.startsWith('M')) {
+                    const mateForPlayer = (ctx.playerColor === 'w' && parseInt(ctx.evalIfBestMovePlayed.substring(1)) > 0) ||
+                                          (ctx.playerColor === 'b' && parseInt(ctx.evalIfBestMovePlayed.substring(1)) < 0);
+                    if (mateForPlayer) {
+                         return `Incroyable ! Vous aviez un mat en ${Math.abs(parseInt(ctx.evalIfBestMovePlayed.substring(1)))} coups avec ${ctx.bestMoveSan}.`;
+                    }
+                }
+                // Occasion de gain matériel important manquée
+                if (bestMoveObj.captured) {
+                    const piece = bestMoveObj.captured.toLowerCase();
+                    if (['q', 'r'].includes(piece) && evalDrop > 2) {
+                        return `Dommage, ${ctx.bestMoveSan} gagnait ${getPieceName(piece, true, true)} adverse.`;
+                    }
+                    if (['b', 'n'].includes(piece) && evalDrop > 1) {
+                        return `Occasion manquée avec ${ctx.bestMoveSan} de gagner ${getPieceName(piece, false, true)} adverse.`;
+                    }
+                }
+                // Occasion de gain d'avantage décisif
+                const advantageThreshold = ctx.playerColor === 'w' ? 2.5 : -2.5;
+                const currentAdvantageThreshold = ctx.playerColor === 'w' ? 0.5 : -0.5;
+                const bestWasWinning = (ctx.playerColor === 'w' && ctx.evalIfBestMovePlayed > advantageThreshold) || (ctx.playerColor === 'b' && ctx.evalIfBestMovePlayed < advantageThreshold);
+                const currentIsNotWinning = (ctx.playerColor === 'w' && ctx.evalAfterPlay < currentAdvantageThreshold) || (ctx.playerColor === 'b' && ctx.evalAfterPlay > currentAdvantageThreshold);
+
+                if (bestWasWinning && currentIsNotWinning && evalDrop > 2) {
+                    return `${ctx.bestMoveSan} vous aurait donné un avantage décisif.`;
+                }
+            }
+        }
+        if (evalDrop > 1.5) {
+             return `Il y avait une meilleure continuation avec ${ctx.bestMoveSan}.`;
+        }
+        return "";
+    }
+    
+    function calculateEvalDrop(evalBest, evalPlayed, playerColor) {
+        const MATE_SCORE = 1000;
+        function getNumericValue(evaluation, color) {
+            if (typeof evaluation === 'string' && evaluation.startsWith('M')) {
+                let mateIn = parseInt(evaluation.substring(1));
+                if ((color === 'w' && mateIn > 0) || (color === 'b' && mateIn < 0)) {
+                    return MATE_SCORE - Math.abs(mateIn);
+                }
+                return -(MATE_SCORE - Math.abs(mateIn));
+            }
+            return (color === 'w') ? evaluation : -evaluation;
+        }
+        const numericBest = getNumericValue(evalBest, playerColor);
+        const numericPlayed = getNumericValue(evalPlayed, playerColor);
+        return numericBest - numericPlayed;
+    }
+
+    function getPositivePlayPhrase(ctx) {
+        const move = ctx.moveData;
+        let phrases = [];
+
+        // Capture gratuite ou avantageuse
+        if (move.captured) {
+            const evalGain = calculateEvalDrop(ctx.evalAfterPlay, ctx.evalBeforePlay, ctx.playerColor);
+            if (evalGain > 0.8) {
+                 phrases.push(`Bien joué ! La capture de ${getPieceName(move.captured, true, true)} en ${move.to} améliore votre position.`);
+            } else if (['Meilleur', 'Brillant', 'Très bon'].includes(ctx.classification)) {
+                 phrases.push(`La capture en ${move.to} est un bon échange.`);
+            }
+        }
+
+        // Développement / Activation
+        const pieceType = move.piece.toLowerCase();
+        const fromRank = parseInt(move.from[1]);
+        const toRank = parseInt(move.to[1]);
+        const fromFile = move.from[0];
+        const toFile = move.to[0];
+
+        // Développement d'une pièce depuis sa case initiale (simplifié)
+        const initialRanks = { w: [1, 2], b: [7, 8] };
+        const isDeveloping = initialRanks[ctx.playerColor].includes(fromRank) &&
+                             !initialRanks[ctx.playerColor].includes(toRank);
+
+        if (isDeveloping && ['n', 'b'].includes(pieceType) && ctx.moveIndex < 15) {
+            phrases.push(`Bon développement de votre ${getPieceName(pieceType)}. ${ctx.san} active la pièce.`);
+        }
+        if (move.flags && (move.flags.includes('k') || move.flags.includes('q')) && ctx.moveIndex < 20) {
+            phrases.push(`Excellent ! Le roque ${ctx.san} met votre roi à l'abri et connecte vos tours.`);
+        }
+
+        // Centralisation
+        const centerSquares = ['d4', 'e4', 'd5', 'e5'];
+        if (centerSquares.includes(move.to) && !centerSquares.includes(move.from) && ['n', 'b', 'q'].includes(pieceType)) {
+            phrases.push(`${ctx.san} place votre ${getPieceName(pieceType)} sur une case centrale influente.`);
+        }
+        
+        // Création d'une menace (simplifié)
+        if (['Meilleur', 'Brillant', 'Très bon', 'Excellent'].includes(ctx.classification) && !move.captured) {
+            if (calculateEvalDrop(ctx.evalAfterPlay, ctx.evalBeforePlay, ctx.playerColor) > 0.5) {
+                 phrases.push(`${ctx.san} renforce votre position et pose des problèmes à l'adversaire.`);
+            }
+        }
+        
+        if (ctx.classification === "Brillant") {
+            phrases.push(`${ctx.san} est une idée subtile et très forte !`);
+        }
+
+        return phrases.filter(p => p).join(" ");
+    }
+    
+    function getGeneralAdvicePhrase(ctx) {
+        if (ctx.moveIndex < 10) {
+            if (ctx.moveData.piece.toLowerCase() === 'q' && (ctx.moveData.from[1] === (ctx.playerColor === 'w' ? '1' : '8'))) {
+                if (ctx.classification === "Imprécision" || ctx.classification === "Erreur") {
+                    return "Sortir la dame trop tôt en début de partie peut la rendre vulnérable aux attaques.";
+                }
+            }
+            if (ctx.moveIndex > 2) {
+                const prevMove = gameHistory[ctx.moveIndex - 2];
+                if (prevMove && prevMove.color === ctx.playerColor && prevMove.piece === ctx.moveData.piece && prevMove.to !== ctx.moveData.from) {
+                     if (ctx.classification === "Imprécision" || ctx.classification === "Bon") {
+                        return "En général, il est préférable de développer différentes pièces dans l'ouverture plutôt que de bouger plusieurs fois la même.";
+                     }
+                }
+            }
+        }
+        return "";
+    }
+
+    // --- Construction de l'explication finale ---
     let explanation = "";
-    const bestSan = getBestMoveSan();
-    const hangingPhrase = getHangingPiecePhrase();
-    const missedPhrase = getMissedOpportunityPhrase();
-    const congratsPhrase = getCongratsForFreeCapture();
-    const activationPhrase = getPieceActivationPhrase();
-    const missedChasePhrase = getMissedChasePhrase();
+    let subPhrases = [];
+
+    const mainEvalDrop = calculateEvalDrop(moveContext.evalIfBestMovePlayed, moveContext.evalAfterPlay, moveContext.playerColor);
 
     switch (classification) {
         case "Théorique":
-            explanation = `${san} est un coup d'ouverture reconnu (${scoreText}). Vous suivez les principes classiques. ${activationPhrase}`;
+            explanation = `${san} est un coup d'ouverture théorique (${scoreText}).`;
+            subPhrases.push("Vous suivez une ligne connue, c'est une bonne base pour la partie.");
             break;
         case "Meilleur":
-            explanation = `${san} est le meilleur coup (${scoreText}). Vous avez joué la suite optimale. ${activationPhrase} ${congratsPhrase}`;
+            explanation = `${san} est le meilleur coup ! (${scoreText}).`;
+            subPhrases.push("Excellent choix, vous maintenez la pression ou exploitez au mieux la position.");
             break;
         case "Brillant":
-            explanation = `${san} est un coup brillant (${scoreText}) : idée tactique rare ou sacrifice remarquable. ${activationPhrase} ${congratsPhrase}`;
+            explanation = `🌟 ${san} est un coup brillant ! (${scoreText}).`;
             break;
         case "Très bon":
-            explanation = `${san} améliore nettement votre position (${scoreText}). Vous avez gagné un avantage sur votre adversaire. ${activationPhrase} ${congratsPhrase}`;
+            explanation = `${san} est un très bon coup (${scoreText}).`;
+            subPhrases.push("Vous améliorez significativement votre position.");
             break;
         case "Excellent":
-            explanation = `${san} est presque optimal (${scoreText}). Vous gardez la pression et limitez les risques. ${activationPhrase} ${congratsPhrase}`;
+            explanation = `${san} est un excellent coup (${scoreText}).`;
+            subPhrases.push("Presque parfait ! Vous continuez sur la bonne voie.");
             break;
         case "Bon":
-            explanation = `${san} est solide (${scoreText}). Une option plus forte existait${bestSan ? ` : ${bestSan}.` : '.'} ${activationPhrase} ${missedPhrase} ${missedChasePhrase} ${congratsPhrase}`;
+            explanation = `${san} est un coup solide (${scoreText}).`;
+            if (moveContext.bestMoveSan && mainEvalDrop > 0.5 && mainEvalDrop < 1.5) {
+                subPhrases.push(`Cependant, ${moveContext.bestMoveSan} aurait été légèrement plus précis.`);
+            }
             break;
         case "Imprécision":
-            explanation = `${san} manque de précision (${scoreText}). ${bestSan ? `Mieux valait ${bestSan}. ` : ''}${activationPhrase} ${missedPhrase || hangingPhrase} ${missedChasePhrase} ${congratsPhrase}`;
+            explanation = `${san} est une imprécision (${scoreText}).`;
+            if (moveContext.bestMoveSan && mainEvalDrop > 0.7) {
+                subPhrases.push(`Cela réduit un peu votre avantage. Mieux valait considérer ${moveContext.bestMoveSan}.`);
+            }
             break;
         case "Erreur":
-            explanation = `${san} détériore votre position (${scoreText}). ${bestSan ? `Il fallait jouer ${bestSan}. ` : ''}${activationPhrase} ${missedPhrase || hangingPhrase} ${missedChasePhrase} ${congratsPhrase}`;
+            explanation = `${san} est une erreur (${scoreText}).`;
+            if (moveContext.bestMoveSan && mainEvalDrop > 1.5) {
+                subPhrases.push(`Ce coup détériore votre position. ${moveContext.bestMoveSan} était nécessaire.`);
+            }
             break;
         case "Manqué":
-            explanation = `${san} rate une occasion décisive (${scoreText}). ${bestSan ? `Avec ${bestSan}, vous pouviez prendre l'avantage. ` : ''}${activationPhrase} ${missedPhrase} ${missedChasePhrase} ${congratsPhrase}`;
+            explanation = `${san} est un coup manqué (${scoreText}).`;
             break;
         case "Gaffe":
-            explanation = `${san} est une gaffe (${scoreText}). Ce coup va finir par vous faire perdre du matériel. ${bestSan ? `Il fallait jouer ${bestSan}. ` : ''}${activationPhrase} ${hangingPhrase} ${missedChasePhrase} ${congratsPhrase}`;
+            explanation = `😱 ${san} est une gaffe ! (${scoreText}).`;
+            if (moveContext.bestMoveSan && mainEvalDrop > 3) {
+                subPhrases.push(`Ce coup risque de vous coûter cher. Il fallait absolument jouer ${moveContext.bestMoveSan}.`);
+            }
             break;
         default:
-            explanation = `${san} (${scoreText}). Analysez la position pour comprendre cette évaluation. ${activationPhrase}`;
+            explanation = `${san} (${scoreText}).`;
+            subPhrases.push("L'analyse suggère cette évaluation pour votre coup.");
             break;
     }
-    // Limit to 3 lines max (split by ". " and join up to 3)
-    return explanation.trim().split(/\. +/).slice(0, 3).join('. ') + (explanation.trim().endsWith('.') ? '' : '.');
+
+    // Ajouter des phrases contextuelles
+    const positivePhrase = getPositivePlayPhrase(moveContext);
+    const blunderPhrase = getLostMaterialBlunderPhrase(moveContext);
+    const missedOpportunity = getMissedOpportunityPhrase(moveContext);
+    const generalAdvice = getGeneralAdvicePhrase(moveContext);
+
+    if (blunderPhrase) {
+        subPhrases.push(blunderPhrase);
+    } else if (missedOpportunity) {
+        subPhrases.push(missedOpportunity);
+    }
+    
+    if (positivePhrase) {
+        subPhrases.push(positivePhrase);
+    }
+    if (generalAdvice && subPhrases.length < 2) {
+        subPhrases.push(generalAdvice);
+    }
+    
+    // Assembler l'explication finale
+    let fullExplanation = explanation;
+    const uniqueSubPhrases = [...new Set(subPhrases.filter(p => p && p.trim() !== ""))];
+
+    for (let i = 0; i < Math.min(uniqueSubPhrases.length, 2); i++) {
+        fullExplanation += " " + uniqueSubPhrases[i];
+    }
+
+    // Nettoyage final et limite de longueur (approximative par phrases)
+    let sentences = fullExplanation.split('. ').map(s => s.trim()).filter(s => s.length > 0);
+    if (sentences.length > 3) {
+        sentences = sentences.slice(0, 3);
+    }
+    fullExplanation = sentences.join('. ') + (sentences.length > 0 && !sentences[sentences.length-1].endsWith('.') ? '.' : '');
+    
+    return fullExplanation.trim();
 }
 
 function updateMoveCommentary(moveIndex) {
