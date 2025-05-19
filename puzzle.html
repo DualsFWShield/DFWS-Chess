@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lichess Puzzle Solver</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Font Awesome for icons (used in your CSS) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <style>
+        /* Additional small style for puzzle info */
+        .puzzle-info {
+            background-color: var(--surface-color);
+            padding: 10px 15px;
+            border-radius: var(--border-radius);
+            margin-bottom: 15px;
+            text-align: center;
+            font-size: 0.9em;
+        }
+        .puzzle-info p {
+            margin: 5px 0;
+        }
+        body.light-theme .puzzle-info {
+            background-color: var(--light-surface-color);
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="controls-container">
+            <button id="theme-toggle-btn" class="control-button" title="Toggle Theme">
+                <i class="fas fa-sun"></i>
+            </button>
+            <button id="fetch-random-puzzle-btn" class="control-button" title="Random Puzzle">
+                <i class="fas fa-random"></i>
+            </button>
+            <button id="fetch-daily-puzzle-btn" class="control-button" title="Daily Puzzle">
+                <i class="fas fa-calendar-day"></i>
+            </button>
+        </div>
+
+        <header>
+            <div class="logo">
+                <i class="fas fa-chess-knight"></i>
+                <h1>Lichess Puzzle Solver</h1>
+            </div>
+        </header>
+
+        <div class="game-layout">
+            <div class="left-sidebar">
+                <div id="puzzle-info-container" class="puzzle-info">
+                    <p>Loading puzzle...</p>
+                </div>
+                 <!-- Placeholder for potential future use like player info -->
+            </div>
+
+            <div class="game-center">
+                <div class="board-wrapper">
+                    <div id="game-status" class="game-status">Welcome! Fetch a puzzle.</div>
+                    <div id="chessboard"></div>
+                     <!-- Progress bar not typically used for puzzles -->
+                </div>
+            </div>
+
+            <div class="right-sidebar">
+                <div class="game-controls">
+                    <button id="hint-button" title="Hint"><i class="fas fa-lightbulb"></i> Hint</button>
+                    <button id="solution-button" title="Show Solution"><i class="fas fa-eye"></i> Solution</button>
+                    <button id="next-puzzle-button" title="Next Puzzle (Random)"><i class="fas fa-forward"></i> Next</button>
+                    <!-- Hidden by default, managed by CSS body.puzzle-mode-active -->
+                    <button id="exit-puzzle-button" style="display:none;">Exit (not used)</button>
+                    <button id="undo-button" style="display:none;">Undo</button>
+                    <button id="analyze-button" style="display:none;">Analyze</button>
+                    <button id="export-button" style="display:none;">Export</button>
+                    <button id="resign-button" style="display:none;">Resign</button>
+                </div>
+                <div class="moves-container" style="display:none;"> <!-- Moves list less relevant for puzzles -->
+                    <h3>Moves</h3>
+                    <ol id="move-list"></ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Promotion Modal -->
+    <div id="promotion-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Promote Pawn</h3>
+            </div>
+            <div class="promotion-options">
+                <div class="promotion-piece" data-piece="q">
+                    <img src="" alt="Queen">
+                </div>
+                <div class="promotion-piece" data-piece="r">
+                    <img src="" alt="Rook">
+                </div>
+                <div class="promotion-piece" data-piece="b">
+                    <img src="" alt="Bishop">
+                </div>
+                <div class="promotion-piece" data-piece="n">
+                    <img src="" alt="Knight">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container"></div>
+
+    <script>
+        const chessboardElement = document.getElementById('chessboard');
+        const gameStatusElement = document.getElementById('game-status');
+        const puzzleInfoContainer = document.getElementById('puzzle-info-container');
+        const hintButton = document.getElementById('hint-button');
+        const solutionButton = document.getElementById('solution-button');
+        const nextPuzzleButton = document.getElementById('next-puzzle-button');
+        const fetchRandomPuzzleButton = document.getElementById('fetch-random-puzzle-btn');
+        const fetchDailyPuzzleButton = document.getElementById('fetch-daily-puzzle-btn');
+        const themeToggleButton = document.getElementById('theme-toggle-btn');
+        const promotionModal = document.getElementById('promotion-modal');
+        const toastContainer = document.querySelector('.toast-container');
+
+        let chess = new Chess();
+        let currentPuzzle = null;
+        let currentSolution = [];
+        let currentSolutionIndex = 0;
+        let playerColor = 'w'; // 'w' or 'b'
+        let selectedSquare = null;
+        let awaitingPromotion = null; // Stores {from, to} if promotion is pending
+
+        // Remplace l'URL des pièces par le dossier local "pieces"
+        const LICHESS_PIECE_CDN = 'pieces/'; // Utilise le dossier local
+        const PIECE_THEME = ''; // Pas de sous-dossier de thème
+
+        function getPieceSvg(piece) {
+            if (!piece) return '';
+            const color = piece.color === 'w' ? 'w' : 'b';
+            const type = piece.type;
+            // Map chess.js type to your filename: p->p, n->n, b->b, r->r, q->q, k->k
+            // Filenames: bb, bk, bn, bp, bq, br, wb, wk, wn, wp, wq, wr
+            return `${LICHESS_PIECE_CDN}${color}${type}.png`;
+        }
+
+        function renderBoard() {
+            chessboardElement.innerHTML = '';
+            const board = chess.board();
+            const isFlipped = playerColor === 'b';
+
+            for (let i = 0; i < 8; i++) {
+                for (let j = 0; j < 8; j++) {
+                    const rank = isFlipped ? i : 7 - i;
+                    const file = isFlipped ? 7 - j : j;
+                    
+                    const square = document.createElement('div');
+                    square.classList.add('square');
+                    const isLight = (rank + file) % 2 !== 0;
+                    square.classList.add(isLight ? 'light' : 'dark');
+                    square.dataset.rank = rank;
+                    square.dataset.file = file;
+                    const algebraic = String.fromCharCode('a'.charCodeAt(0) + file) + (rank + 1);
+                    square.dataset.algebraic = algebraic;
+
+                    // Add square labels (optional)
+                    if (j === 0 && !isFlipped || j === 7 && isFlipped) {
+                        const rankLabel = document.createElement('span');
+                        rankLabel.classList.add('square-label', 'rank-label');
+                        rankLabel.textContent = rank + 1;
+                        square.appendChild(rankLabel);
+                    }
+                    if (i === 7 && !isFlipped || i === 0 && isFlipped) {
+                        const fileLabel = document.createElement('span');
+                        fileLabel.classList.add('square-label', 'file-label');
+                        fileLabel.textContent = String.fromCharCode('a'.charCodeAt(0) + file);
+                        square.appendChild(fileLabel);
+                    }
+
+
+                    const piece = board[rank][file];
+                    if (piece) {
+                        const pieceElement = document.createElement('img');
+                        pieceElement.classList.add('piece');
+                        pieceElement.src = getPieceSvg(piece);
+                        pieceElement.alt = `${piece.color === 'w' ? 'White' : 'Black'} ${piece.type}`;
+                        square.appendChild(pieceElement);
+                    }
+                    square.addEventListener('click', () => handleSquareClick(algebraic));
+                    chessboardElement.appendChild(square);
+                }
+            }
+            updateHighlights();
+        }
+
+        function updateHighlights() {
+            document.querySelectorAll('.square.selected, .square.highlight, .square.capture, .square.last-move, .square.in-check, .square.hint-from, .square.hint-to').forEach(sq => {
+                sq.classList.remove('selected', 'highlight', 'capture', 'last-move', 'in-check', 'hint-from', 'hint-to');
+                // Clear ::after content if it was manually set (less common for these)
+                // For highlights that use ::after with background-color, removing the class is usually enough.
+            });
+
+            if (selectedSquare) {
+                const sqElement = document.querySelector(`.square[data-algebraic="${selectedSquare}"]`);
+                if (sqElement) sqElement.classList.add('selected');
+            }
+
+            // Highlight last move (if any)
+            const history = chess.history({ verbose: true });
+            if (history.length > 0) {
+                const lastMove = history[history.length - 1];
+                document.querySelector(`.square[data-algebraic="${lastMove.from}"]`)?.classList.add('last-move');
+                document.querySelector(`.square[data-algebraic="${lastMove.to}"]`)?.classList.add('last-move');
+            }
+            
+            // Highlight king in check
+            if (chess.in_check()) {
+                const kingPos = findKing(chess.turn());
+                if (kingPos) {
+                    document.querySelector(`.square[data-algebraic="${kingPos}"]`)?.classList.add('in-check');
+                }
+            }
+        }
+
+        function findKing(color) {
+            const board = chess.board();
+            for (let r = 0; r < 8; r++) {
+                for (let f = 0; f < 8; f++) {
+                    const piece = board[r][f];
+                    if (piece && piece.type === 'k' && piece.color === color) {
+                        return String.fromCharCode('a'.charCodeAt(0) + f) + (r + 1);
+                    }
+                }
+            }
+            return null;
+        }
+
+
+        function handleSquareClick(algebraic) {
+            if (!currentPuzzle || chess.game_over()) return;
+
+            const pieceOnSquare = chess.get(algebraic);
+
+            if (selectedSquare) {
+                const moveUCI = selectedSquare + algebraic;
+                let promotionChar = '';
+
+                // Check if this is the correct puzzle move
+                const expectedMoveFull = currentSolution[currentSolutionIndex]; // e.g., "e7e8q"
+                const expectedMoveShort = expectedMoveFull.substring(0, 4);    // e.g., "e7e8"
+                
+                if (expectedMoveFull.length === 5) { // It's a promotion
+                    promotionChar = expectedMoveFull.charAt(4);
+                }
+
+                if (moveUCI === expectedMoveShort) {
+                    const moveAttempt = { from: selectedSquare, to: algebraic };
+                    if (promotionChar) {
+                        moveAttempt.promotion = promotionChar;
+                    } else { // Check if it's a pawn move to promotion rank without explicit char
+                        const piece = chess.get(selectedSquare);
+                        if (piece && piece.type === 'p' && 
+                            ((piece.color === 'w' && selectedSquare[1] === '7' && algebraic[1] === '8') ||
+                             (piece.color === 'b' && selectedSquare[1] === '2' && algebraic[1] === '1'))) {
+                            // This case implies the puzzle solution SHOULD have had a promotion char.
+                            // For simplicity, we'll assume 'q' if Lichess API didn't specify.
+                            // However, Lichess puzzle solutions are usually explicit.
+                            // If not, this could be a source of error if puzzle expects non-queen.
+                            // For safety, if puzzle expects promotion, it *must* be in expectedMoveFull
+                            showToast("Error: Puzzle solution missing promotion character for a promoting move.", "error");
+                            selectedSquare = null;
+                            updateHighlights();
+                            return;
+                        }
+                    }
+
+                    const result = chess.move(moveAttempt);
+                    if (result) {
+                        gameStatusElement.textContent = "Correct!";
+                        showToast("Correct!", "success");
+                        currentSolutionIndex++;
+                        selectedSquare = null;
+                        renderBoard();
+
+                        if (currentSolutionIndex >= currentSolution.length) {
+                            gameStatusElement.textContent = "Puzzle Solved!";
+                            showToast("Puzzle Solved! 🎉", "success", 3000);
+                            // Optionally trigger confetti or other celebration
+                        } else {
+                            // Make opponent's move after a short delay
+                            setTimeout(makeOpponentMove, 500);
+                        }
+                    } else {
+                        // This should not happen if UCI matches and chess.js logic is sound
+                        gameStatusElement.textContent = "Invalid move (internal error).";
+                        showToast("Invalid move (internal error).", "error");
+                        selectedSquare = null;
+                    }
+                } else {
+                    gameStatusElement.textContent = "Incorrect. Try again.";
+                    showToast("Incorrect move.", "error");
+                    selectedSquare = null; // Deselect
+                }
+            } else {
+                if (pieceOnSquare && pieceOnSquare.color === playerColor && pieceOnSquare.color === chess.turn()) {
+                    selectedSquare = algebraic;
+                } else {
+                    selectedSquare = null;
+                }
+            }
+            updateHighlights();
+        }
+
+        function makeOpponentMove() {
+            if (currentSolutionIndex >= currentSolution.length || chess.game_over()) return;
+
+            const opponentMoveUCI = currentSolution[currentSolutionIndex];
+            let moveAttempt = {
+                from: opponentMoveUCI.substring(0, 2),
+                to: opponentMoveUCI.substring(2, 4)
+            };
+            if (opponentMoveUCI.length === 5) {
+                moveAttempt.promotion = opponentMoveUCI.charAt(4);
+            }
+
+            const result = chess.move(moveAttempt);
+            if (result) {
+                currentSolutionIndex++;
+                renderBoard();
+                if (currentSolutionIndex >= currentSolution.length) {
+                     gameStatusElement.textContent = "Puzzle Solved! (Opponent's last move)";
+                     showToast("Puzzle Solved! 🎉", "success", 3000);
+                } else {
+                    gameStatusElement.textContent = `Your turn (${playerColor === 'w' ? 'White' : 'Black'}).`;
+                }
+            } else {
+                gameStatusElement.textContent = "Error in puzzle's opponent move.";
+                showToast("Error processing opponent's move from puzzle data.", "error");
+            }
+            updateHighlights();
+        }
+        
+        async function fetchPuzzle(type = "random") { // type can be "random" or "daily"
+            gameStatusElement.textContent = "Fetching puzzle...";
+            puzzleInfoContainer.innerHTML = "<p>Loading puzzle...</p>";
+            selectedSquare = null;
+            currentSolutionIndex = 0;
+            hintButton.disabled = true;
+            solutionButton.disabled = true;
+            nextPuzzleButton.disabled = true;
+            document.body.classList.add('puzzle-mode-active');
+
+            try {
+                // Use the /api/puzzle/next endpoint, which is public and returns a random puzzle
+                const apiUrl = "https://lichess.org/api/puzzle/next";
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}.<br>This may be due to Lichess API not allowing direct browser access (CORS).<br>Try running this app from a server or use a backend proxy.`);
+                }
+                const puzzleData = await response.json();
+
+                currentPuzzle = puzzleData;
+                // Charge le FEN reçu par lichess sur l'échiquier
+                if (puzzleData.game && puzzleData.game.fen) {
+                    chess = new Chess(puzzleData.game.fen);
+                } else {
+                    chess = new Chess(); // fallback to initial position if FEN missing
+                }
+
+                // Affiche la bonne couleur à jouer (side to move dans le FEN)
+                playerColor = chess.turn();
+
+                currentSolution = puzzleData.puzzle.solution || [];
+
+                renderBoard();
+                gameStatusElement.textContent = `Your turn (${playerColor === 'w' ? 'White' : 'Black'}). Solve the puzzle!`;
+                puzzleInfoContainer.innerHTML = `
+                    <p><strong>FEN:</strong> ${puzzleData.game.fen || ''}</p>
+                    <p><strong>Rating:</strong> ${puzzleData.puzzle.rating}</p>
+                    <p><strong>Themes:</strong> ${(puzzleData.puzzle.themes || []).join(', ')}</p>
+                    <p><strong>Plays:</strong> ${puzzleData.puzzle.plays || puzzleData.puzzle.nbPlays || 0}</p>
+                `;
+                hintButton.disabled = false;
+                solutionButton.disabled = false;
+                nextPuzzleButton.disabled = false;
+            } catch (error) {
+                console.error("Failed to fetch puzzle:", error);
+                gameStatusElement.innerHTML = "Failed to load puzzle.<br>This may be due to Lichess API not allowing direct browser access (CORS).<br>See console for details.";
+                puzzleInfoContainer.innerHTML = "<p>Error loading puzzle.</p>";
+                showToast("Error fetching puzzle: " + error.message, "error", 7000);
+            }
+        }
+
+        // Add a function to load a random puzzle from a local CSV file
+        async function fetchPuzzleFromCSV(csvUrl = "puzzles.csv") {
+            gameStatusElement.textContent = "Chargement d'un puzzle...";
+            puzzleInfoContainer.innerHTML = "<p>Chargement du puzzle...</p>";
+            selectedSquare = null;
+            currentSolutionIndex = 0;
+            hintButton.disabled = true;
+            solutionButton.disabled = true;
+            nextPuzzleButton.disabled = true;
+            document.body.classList.add('puzzle-mode-active');
+
+            try {
+                // Fetch the CSV file
+                const response = await fetch(csvUrl);
+                if (!response.ok) throw new Error("Erreur lors du chargement du fichier CSV");
+                const csvText = await response.text();
+
+                // Parse CSV (skip header)
+                const lines = csvText.trim().split('\n');
+                if (lines.length <= 1) throw new Error("Aucun puzzle trouvé dans le CSV");
+                const puzzles = lines.slice(1).map(line => {
+                    // Split respecting quoted fields
+                    // Simple split for standard CSV (no commas in fields)
+                    const fields = line.split(',');
+                    return {
+                        PuzzleId: fields[0],
+                        FEN: fields[1],
+                        Moves: fields[2],
+                        Rating: fields[3],
+                        RatingDeviation: fields[4],
+                        Popularity: fields[5],
+                        NbPlays: fields[6],
+                        Themes: fields[7],
+                        GameUrl: fields[8],
+                        OpeningTags: fields[9]
+                    };
+                });
+
+                // Pick a random puzzle
+                const puzzle = puzzles[Math.floor(Math.random() * puzzles.length)];
+
+                // The position to present is after applying the first move to the FEN
+                const fen = puzzle.FEN;
+                const moves = puzzle.Moves.trim().split(' ');
+                const chessTmp = new Chess(fen);
+                if (moves.length > 0 && moves[0]) {
+                    chessTmp.move({
+                        from: moves[0].substring(0,2),
+                        to: moves[0].substring(2,4),
+                        promotion: moves[0].length === 5 ? moves[0][4] : undefined
+                    });
+                }
+                chess = chessTmp;
+
+                // The solution is all moves except the first (which was just played)
+                currentSolution = moves.slice(1);
+
+                // Set player color to the side to move after the first move
+                playerColor = chess.turn();
+
+                currentPuzzle = puzzle;
+
+                renderBoard();
+                gameStatusElement.textContent = `À vous de jouer (${playerColor === 'w' ? 'Blancs' : 'Noirs'}) !`;
+                puzzleInfoContainer.innerHTML = `
+                    <p><strong>FEN:</strong> ${fen}</p>
+                    <p><strong>Rating:</strong> ${puzzle.Rating}</p>
+                    <p><strong>Themes:</strong> ${(puzzle.Themes || '').replace(/ /g, ', ')}</p>
+                    <p><strong>Plays:</strong> ${puzzle.NbPlays}</p>
+                    <p><a href="${puzzle.GameUrl}" target="_blank">Voir la partie</a></p>
+                `;
+                hintButton.disabled = false;
+                solutionButton.disabled = false;
+                nextPuzzleButton.disabled = false;
+            } catch (error) {
+                console.error("Erreur lors du chargement du puzzle CSV:", error);
+                gameStatusElement.innerHTML = "Erreur lors du chargement du puzzle CSV.";
+                puzzleInfoContainer.innerHTML = "<p>Erreur de chargement.</p>";
+                showToast("Erreur CSV: " + error.message, "error", 7000);
+            }
+        }
+
+        hintButton.addEventListener('click', () => {
+            if (!currentPuzzle || currentSolutionIndex >= currentSolution.length) return;
+
+            const nextMoveUCI = currentSolution[currentSolutionIndex];
+            const fromSq = nextMoveUCI.substring(0, 2);
+            const toSq = nextMoveUCI.substring(2, 4);
+
+            // Clear previous hints
+            document.querySelectorAll('.square.hint-from, .square.hint-to').forEach(sq => {
+                sq.classList.remove('hint-from', 'hint-to');
+            });
+
+            // Add new hints
+            const fromElement = document.querySelector(`.square[data-algebraic="${fromSq}"]`);
+            const toElement = document.querySelector(`.square[data-algebraic="${toSq}"]`);
+            
+            if (fromElement) fromElement.classList.add('hint-from');
+            if (toElement) toElement.classList.add('hint-to');
+            
+            showToast(`Hint: Move from ${fromSq} to ${toSq}`, "info");
+
+            // Optional: remove hint highlights after a delay
+            setTimeout(() => {
+                fromElement?.classList.remove('hint-from');
+                toElement?.classList.remove('hint-to');
+            }, 3000);
+        });
+
+        solutionButton.addEventListener('click', async () => {
+            if (!currentPuzzle || currentSolutionIndex >= currentSolution.length) return;
+            
+            hintButton.disabled = true;
+            solutionButton.disabled = true;
+            gameStatusElement.textContent = "Showing solution...";
+
+            for (let i = currentSolutionIndex; i < currentSolution.length; i++) {
+                const moveUCI = currentSolution[i];
+                 let moveAttempt = {
+                    from: moveUCI.substring(0, 2),
+                    to: moveUCI.substring(2, 4)
+                };
+                if (moveUCI.length === 5) { // Promotion
+                    moveAttempt.promotion = moveUCI.charAt(4);
+                }
+                
+                const moveResult = chess.move(moveAttempt);
+                if (moveResult) {
+                    renderBoard();
+                    updateHighlights(); // Show last move highlight
+                    await new Promise(resolve => setTimeout(resolve, 800)); // Delay between moves
+                } else {
+                    showToast(`Error in solution at move: ${moveUCI}`, "error");
+                    break; 
+                }
+            }
+            currentSolutionIndex = currentSolution.length; // Mark as fully shown
+            gameStatusElement.textContent = "Solution shown. Fetch a new puzzle.";
+            showToast("Solution finished.", "info");
+        });
+
+        nextPuzzleButton.addEventListener('click', () => fetchPuzzleFromCSV());
+        fetchRandomPuzzleButton.addEventListener('click', () => fetchPuzzleFromCSV());
+        fetchDailyPuzzleButton.addEventListener('click', () => fetchPuzzleFromCSV());
+
+        // Theme Toggle
+        themeToggleButton.addEventListener('click', () => {
+            document.body.classList.toggle('light-theme');
+            const icon = themeToggleButton.querySelector('i');
+            if (document.body.classList.contains('light-theme')) {
+                icon.classList.remove('fa-sun');
+                icon.classList.add('fa-moon');
+                localStorage.setItem('chessTheme', 'light');
+            } else {
+                icon.classList.remove('fa-moon');
+                icon.classList.add('fa-sun');
+                localStorage.setItem('chessTheme', 'dark');
+            }
+        });
+
+        // Load saved theme
+        function loadTheme() {
+            const savedTheme = localStorage.getItem('chessTheme');
+            const icon = themeToggleButton.querySelector('i');
+            if (savedTheme === 'light') {
+                document.body.classList.add('light-theme');
+                icon.classList.remove('fa-sun');
+                icon.classList.add('fa-moon');
+            } else {
+                document.body.classList.remove('light-theme'); // Default is dark
+                icon.classList.remove('fa-moon');
+                icon.classList.add('fa-sun');
+            }
+        }
+        
+        // Toast Notifications
+        function showToast(message, type = 'info', duration = 3000) {
+            const toast = document.createElement('div');
+            toast.classList.add('toast', `toast-${type}`); // You might want to add specific styling for toast types
+            
+            let iconClass = 'fas fa-info-circle'; // Default icon
+            if (type === 'success') iconClass = 'fas fa-check-circle';
+            else if (type === 'error') iconClass = 'fas fa-exclamation-circle';
+            else if (type === 'warning') iconClass = 'fas fa-exclamation-triangle';
+
+            toast.innerHTML = `<i class="${iconClass}"></i> ${message}`;
+            toastContainer.appendChild(toast);
+
+            // Show toast
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 100); // Small delay to allow CSS transition
+
+            // Hide and remove toast
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toast.remove();
+                }, 500); // Wait for fade out transition
+            }, duration);
+        }
+
+        // Initial setup
+        loadTheme();
+        // fetchPuzzle("daily"); // Optionally fetch a puzzle on load
+        document.body.classList.add('puzzle-mode-active'); // Set this so puzzle controls are visible
+        renderBoard(); // Render an empty board initially or after fetching
+        gameStatusElement.textContent = "Select 'Daily' or 'Random' puzzle to start!";
+        hintButton.disabled = true;
+        solutionButton.disabled = true;
+        nextPuzzleButton.disabled = true;
+
+
+    </script>
+</body>
+</html>
