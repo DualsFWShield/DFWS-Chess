@@ -413,9 +413,7 @@ h1 {
 .difficulty-button.difficulty-learn .level-bar {
     background: var(--learn-color);
 }
-.difficulty-button.difficulty-learn span {
-    /* Optional: different text color? */
-}
+/* Removed empty ruleset for .difficulty-button.difficulty-learn span */
 .difficulty-button.difficulty-learn:hover {
     background: var(--learn-color);
 }
