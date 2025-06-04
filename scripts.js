@@ -1788,8 +1788,196 @@ function updateAllUI() {
 
 function updateGameStatus(statusText) {
     if (gameStatusEl) gameStatusEl.textContent = statusText;
+
+    // Add functionality to close modals manually
+    const modals = document.querySelectorAll('.modal');
+    modals.forEach(modal => {
+        // Ensure a close button exists
+        let closeButton = modal.querySelector('.close-button');
+        if (!closeButton) {
+            closeButton = document.createElement('button');
+            closeButton.classList.add('close-button');
+            closeButton.textContent = 'Fermer';
+            modal.appendChild(closeButton);
+        }
+
+        closeButton.addEventListener('click', () => {
+            modal.classList.remove('show');
+        });
+    });
 }
 
+// --- Drag & Drop Logic ---
+let draggedPiece = null;
+let draggedSquare = null;
+let originalSquareCoords = null;
+
+function enableDragAndDrop() {
+    if (!chessboard) return;
+    
+    chessboard.addEventListener('mousedown', startDrag);
+    document.addEventListener('mousemove', handleDrag);
+    document.addEventListener('mouseup', endDrag);
+    
+    // Touch support
+    chessboard.addEventListener('touchstart', handleTouchStart, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
+}
+
+function startDrag(e) {
+    if (isGameOver || isStockfishThinking || isReviewing || promotionCallback) return;
+    
+    const square = e.target.closest('.square');
+    if (!square) return;
+    
+    const pieceEl = square.querySelector('.piece');
+    if (!pieceEl) return;
+    
+    const coord = square.dataset.coord?.split(',');
+    if (!coord) return;
+    
+    const row = parseInt(coord[0]);
+    const col = parseInt(coord[1]);
+    const alg = coordToAlg(row, col);
+    const piece = game.get(alg);
+    
+    // Check if it's a valid piece to drag
+    const currentTurn = game.turn();
+    const isHumanTurn = (gameMode === 'human' || (gameMode === 'ai' && (currentTurn === 'w' || currentTurn === 'b')));
+    if (!isHumanTurn || !piece || piece.color !== currentTurn) return;
+
+    e.preventDefault();
+    draggedPiece = pieceEl.cloneNode(true);
+    draggedSquare = square;
+    originalSquareCoords = { x: square.offsetLeft, y: square.offsetTop };
+    
+    // Style the dragged piece
+    draggedPiece.classList.add('dragged-piece');
+    document.body.appendChild(draggedPiece);
+    
+    // Add pulse animation to original piece
+    pieceEl.classList.add('pulse-animation');
+    
+    // Position the dragged piece at cursor
+    const boardRect = chessboard.getBoundingClientRect();
+    const x = e.clientX - boardRect.left;
+    const y = e.clientY - boardRect.top;
+    updateDraggedPiecePosition(x, y);
+    
+    // Show legal moves
+    selectedSquareAlg = alg;
+    const legalMoves = game.moves({ square: alg, verbose: true });
+    highlightMoves(legalMoves);
+}
+
+function handleDrag(e) {
+    if (!draggedPiece) return;
+    e.preventDefault();
+    
+    const boardRect = chessboard.getBoundingClientRect();
+    const x = e.clientX - boardRect.left;
+    const y = e.clientY - boardRect.top;
+    updateDraggedPiecePosition(x, y);
+}
+
+function handleTouchStart(e) {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const mouseEvent = new MouseEvent('mousedown', {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    });
+    startDrag(mouseEvent);
+}
+
+function handleTouchMove(e) {
+    if (!draggedPiece || e.touches.length !== 1) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const mouseEvent = new MouseEvent('mousemove', {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    });
+    handleDrag(mouseEvent);
+}
+
+function handleTouchEnd(e) {
+    const touch = e.changedTouches[0];
+    const mouseEvent = new MouseEvent('mouseup', {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    });
+    endDrag(mouseEvent);
+}
+
+function updateDraggedPiecePosition(x, y) {
+    if (!draggedPiece) return;
+    const squareSize = chessboard.offsetWidth / 8;
+    draggedPiece.style.width = `${squareSize}px`; // Ensure proper scaling
+    draggedPiece.style.height = `${squareSize}px`; // Ensure proper scaling
+    draggedPiece.style.left = `${x - squareSize / 2}px`;
+    draggedPiece.style.top = `${y - squareSize / 2}px`;
+}
+
+function endDrag(e) {
+    if (!draggedPiece || !draggedSquare) return;
+    
+    const boardRect = chessboard.getBoundingClientRect();
+    const x = e.clientX - boardRect.left;
+    const y = e.clientY - boardRect.top;
+    const squareSize = boardRect.width / 8;
+    
+    // Calculate target square
+    const targetCol = Math.floor(x / squareSize);
+    const targetRow = Math.floor(y / squareSize);
+    
+    // Remove drag elements and animations
+    draggedPiece.remove();
+    draggedPiece = null;
+    const originalPiece = draggedSquare.querySelector('.piece');
+    if (originalPiece) originalPiece.classList.remove('pulse-animation');
+    
+    // Clear highlights
+    highlightMoves([]);
+    
+    // Validate and make move if legal
+    if (targetRow >= 0 && targetRow < 8 && targetCol >= 0 && targetCol < 8) {
+        const fromAlg = selectedSquareAlg;
+        const toAlg = coordToAlg(targetRow, targetCol);
+        
+        // Check if move would be a promotion
+        const piece = game.get(fromAlg);
+        const isPromotion = piece && 
+                           piece.type === 'p' && 
+                           ((piece.color === 'w' && targetRow === 0) || 
+                            (piece.color === 'b' && targetRow === 7));
+        
+        if (isPromotion) {
+            showPromotionModal(piece.color === 'w' ? 'white' : 'black', (promoChoice) => {
+                if (promoChoice) {
+                    makeMove(fromAlg, toAlg, promoChoice);
+                    if (gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
+                        setTimeout(requestAiMove, aiDelayEnabled ? AI_DELAY_TIME : 50);
+                    }
+                }
+            });
+        } else {
+            const success = makeMove(fromAlg, toAlg);
+            if (success && gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
+                setTimeout(requestAiMove, aiDelayEnabled ? AI_DELAY_TIME : 50);
+            }
+        }
+    }
+    
+    selectedSquareAlg = null;
+    draggedSquare = null;
+}
+
+// Initialize drag and drop when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    enableDragAndDrop();
+});
 function updateCapturedPieces() {
     // capturedWhite has uppercase ('P', 'N') - white pieces captured by Black
     // capturedBlack has lowercase ('p', 'n') - black pieces captured by White
@@ -1810,7 +1998,7 @@ function updateCapturedPieces() {
                      // Generate img tag for PNG
                      const colorPrefix = (p === p.toUpperCase()) ? 'w' : 'b';
                      let pieceCode = p.toLowerCase();
-                     if (pieceCode === 'n') pieceCode = 'n'; // Or 'kn' based on your filenames
+                     if (pieceCode === 'n') pieceCode = 'n'; // Adjust if needed for knight filename
                      const filename = `${colorPrefix}${pieceCode}.png`;
                      return `<img src="pieces/${filename}" alt="${p}" style="width: 1em; height: 1em; vertical-align: middle;">`; // Inline style for simple sizing
                  }
