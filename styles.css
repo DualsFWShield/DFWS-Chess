@@ -604,6 +604,85 @@ body.light-theme .black-piece {
     filter: brightness(1.2);
 }
 
+/* Drag & Drop Styles */
+.piece {
+    user-select: none;
+    cursor: grab;
+    transition: transform 0.1s;
+}
+
+.piece.dragging {
+    cursor: grabbing;
+    transform: scale(1.1);
+    animation: pulse 0.5s infinite;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.piece-ghost {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1.1); }
+    50% { transform: scale(1.15); }
+    100% { transform: scale(1.1); }
+}
+/* Close Button for Modals */
+.modal .close-button {
+    background: var(--secondary-color);
+    color: var(--text-color);
+    border: none;
+    border-radius: 10%;
+    padding: 5px 10px; /* Adjusted to match text size */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1em; /* Match text size */
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+.modal .close-button:hover {
+    background: var(--primary-color);
+    color: white;
+    transform: scale(1.1);
+}
+
+body.light-theme .modal .close-button {
+    background: var(--light-secondary-color);
+    color: var(--light-text-color);
+}
+
+body.light-theme .modal .close-button:hover {
+    background: var(--light-primary-color);
+    color: white;
+}
+/* Move indicators */
+.move-indicator {
+    position: absolute;
+    width: 30%;
+    height: 30%;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 2;
+    transform: translate(-50%, -50%);
+    left: 50%;
+    top: 50%;
+}
+
+.move-indicator.legal-move {
+    background-color: rgba(20, 85, 30, 0.3);
+    border: 2px solid rgba(20, 85, 30, 0.5);
+}
+
+.move-indicator.capture-move {
+    background-color: rgba(170, 20, 20, 0.2);
+    border: 2px solid rgba(170, 20, 20, 0.5);
+}
+
 /* Square Highlights */
 .square::after {
     /* General highlight pseudo-element */
