@@ -1261,6 +1261,7 @@ body.light-theme .modal {
     padding: 15px;
     margin-top: 15px;
     box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+    -webkit-backdrop-filter: blur(3px); /* Effet verre dépoli for Safari */
     backdrop-filter: blur(3px); /* Effet verre dépoli */
 }
 #coach-box h2 {
