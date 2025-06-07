@@ -49,6 +49,7 @@ let promotionCallback = null; // Stores the callback for promotion choice
 let isReviewing = false; // Flag for game review state
 let autoFlipEnabled = true; // Default to auto-flipping in H vs H mode
 let pickedUpPieceElement = null; // Stores the visual element of the piece being moved
+let isDraggingViaMouseDown = false; // Flag to track if a drag operation is active via mousedown
 
 // --- Statistics & Ratings ---
 let gamesPlayed = 0, wins = 0, losses = 0, draws = 0;
@@ -1473,8 +1474,32 @@ function showAIReaction(playerMoveSAN) {
     }
 }
 
+// Function to update the position of the picked-up piece to follow the cursor
+function updatePickedUpPiecePosition(event) {
+    if (!pickedUpPieceElement) return;
+
+    // The piece is appended to document.body, so positioning is viewport-relative + scroll.
+    const scrollX = window.scrollX || document.documentElement.scrollLeft;
+    const scrollY = window.scrollY || document.documentElement.scrollTop;
+
+    // Center the piece on the cursor.
+    // event.clientX/Y are viewport-relative.
+    let x = event.clientX + scrollX - (pickedUpPieceElement.offsetWidth / 2);
+    let y = event.clientY + scrollY - (pickedUpPieceElement.offsetHeight / 2);
+
+    pickedUpPieceElement.style.left = `${x}px`;
+    pickedUpPieceElement.style.top = `${y}px`;
+}
+
 // --- User Interaction (Click Handler) ---
 function handleSquareClick(event) {
+    // If a drag operation just finished, this click is likely the mouseup.
+    // Reset the flag and ignore the click to prevent click-to-move from re-triggering.
+    if (isDraggingViaMouseDown) {
+        isDraggingViaMouseDown = false;
+        return;
+    }
+
     const square = event.target.closest('.square'); // Get the square element
     if (!square) return; // Clicked outside a square?
 
@@ -1566,6 +1591,38 @@ function handleSquareClick(event) {
     const isPlayerAllowedToMove = (gameMode === 'human' || (gameMode === 'ai' && currentTurn === 'w'));
     if (!isPlayerAllowedToMove) return;
 
+    // Helper function to reset selection state
+    const resetSelectionState = (originalSquareAlg = selectedSquareAlg) => {
+        if (originalSquareAlg) {
+            const fromCoord = algToCoord(originalSquareAlg);
+            if (fromCoord) {
+                const originalSquareDomElement = chessboard.querySelector(`.square[data-row="${fromCoord[0]}"][data-col="${fromCoord[1]}"]`);
+                if (originalSquareDomElement) {
+                    const originalPieceDomElement = originalSquareDomElement.querySelector('.piece');
+                    if (originalPieceDomElement) {
+                        originalPieceDomElement.style.visibility = 'visible';
+                    }
+                    originalSquareDomElement.classList.remove('selected');
+                }
+            }
+        }
+
+        if (pickedUpPieceElement && pickedUpPieceElement.parentNode) {
+            pickedUpPieceElement.parentNode.removeChild(pickedUpPieceElement);
+        }
+        pickedUpPieceElement = null;
+
+        // Also remove 'selected' class from the last clicked square if it was added there
+        // (e.g. if 'square' is different from originalSquareDomElement)
+        if (square && square.classList.contains('selected')) {
+             square.classList.remove('selected');
+        }
+
+        selectedSquareAlg = null;
+        highlightMoves([]); // Clear all move highlights
+        document.removeEventListener('mousemove', updatePickedUpPiecePosition);
+    };
+
     if (!selectedSquareAlg) {
         // --- No piece selected: Try to pick up a piece ---
         if (pieceOnSquareData && pieceOnSquareData.color === currentTurn) {
@@ -1574,64 +1631,34 @@ function handleSquareClick(event) {
 
             const originalPieceElement = square.querySelector('.piece'); // The img/span element
             if (originalPieceElement) {
-                // Clone the piece for dragging
                 pickedUpPieceElement = originalPieceElement.cloneNode(true);
-                pickedUpPieceElement.classList.add('picked-up-piece'); // For CSS styling (z-index, size, position:absolute)
+                pickedUpPieceElement.classList.add('picked-up-piece');
 
-                // Position initially at the click relative to the board for smooth pickup
-                const boardRect = chessboard.getBoundingClientRect(); // Used for reference, but piece is child of body
                 const scrollX = window.scrollX || document.documentElement.scrollLeft;
                 const scrollY = window.scrollY || document.documentElement.scrollTop;
+                let initialX = event.clientX + scrollX - (pickedUpPieceElement.offsetWidth / 2);
+                let initialY = event.clientY + scrollY - (pickedUpPieceElement.offsetHeight / 2);
 
-                // Since pickedUpPieceElement is appended to document.body, its position should be viewport-relative + scroll.
-                // event.clientX/Y is already viewport-relative.
-                let initialX = event.clientX + scrollX;
-                let initialY = event.clientY + scrollY;
-
-                pickedUpPieceElement.style.left = `${initialX - originalPieceElement.offsetWidth / 2}px`;
-                pickedUpPieceElement.style.top = `${initialY - originalPieceElement.offsetHeight / 2}px`;
-
+                pickedUpPieceElement.style.left = `${initialX}px`;
+                pickedUpPieceElement.style.top = `${initialY}px`;
                 document.body.appendChild(pickedUpPieceElement);
 
-                originalPieceElement.style.visibility = 'hidden'; // Hide the original piece
+                originalPieceElement.style.visibility = 'hidden';
 
                 document.addEventListener('mousemove', updatePickedUpPiecePosition);
 
                 const moves = game.moves({ square: clickedAlg, verbose: true });
                 highlightMoves(moves);
-                square.classList.add('selected'); // Visual feedback for original square
+                square.classList.add('selected');
             }
         }
     } else {
         // --- Piece already selected: Try to place it or deselect ---
-        const fromAlg = selectedSquareAlg;
-        // Find the DOM element for the square where the piece was originally picked up from
-        const fromCoord = algToCoord(fromAlg);
-        const originalSquareDomElement = fromCoord ? chessboard.querySelector(`.square[data-row="${fromCoord[0]}"][data-col="${fromCoord[1]}"]`) : null;
-        const originalPieceDomElement = originalSquareDomElement ? originalSquareDomElement.querySelector('.piece') : null;
+        const fromAlg = selectedSquareAlg; // The square the piece was picked up from
 
-        const resetSelectionState = () => {
-            if (originalPieceDomElement) {
-                originalPieceDomElement.style.visibility = 'visible'; // Make original piece visible again
-            }
-            if (pickedUpPieceElement && pickedUpPieceElement.parentNode) {
-                pickedUpPieceElement.parentNode.removeChild(pickedUpPieceElement);
-            }
-            pickedUpPieceElement = null;
-            if (originalSquareDomElement) {
-                originalSquareDomElement.classList.remove('selected');
-            }
-            // Also remove 'selected' class from the target square if it was added
-            square.classList.remove('selected');
-
-            selectedSquareAlg = null;
-            highlightMoves([]); // Clear all move highlights
-            document.removeEventListener('mousemove', updatePickedUpPiecePosition);
-        };
-
-        if (clickedAlg === fromAlg) { // Clicked the same square
-            resetSelectionState();
-            playSound('click'); // Sound for deselecting
+        if (clickedAlg === fromAlg) { // Clicked the same square to deselect
+            resetSelectionState(fromAlg);
+            playSound('click');
             return;
         }
 
@@ -1641,21 +1668,22 @@ function handleSquareClick(event) {
         if (targetMove) {
             // --- Valid Move Target ---
             if (targetMove.flags.includes('p')) { // Promotion
-                // Store necessary info before reset, as modal is async
                 const currentPromotionFrom = fromAlg;
                 const currentPromotionTo = clickedAlg;
                 const currentTurnForPromotion = currentTurn;
 
-                resetSelectionState(); // Reset visual state before showing modal
+                resetSelectionState(fromAlg); // Reset visuals before modal
 
                 showPromotionModal(currentTurnForPromotion === 'w' ? 'white' : 'black', (promoChoice) => {
                     if (!promoChoice) {
                         console.log("Promotion cancelled.");
-                        // Piece is already visually back on its square due to resetSelectionState.
-                        // No further action needed beyond what resetSelectionState did.
+                        // Visuals are already reset. If board needs redraw for piece to reappear, call createBoard().
+                        // createBoard(); // Consider if needed if original piece isn't appearing.
                         return;
                     }
                     const success = makeMove(currentPromotionFrom, currentPromotionTo, promoChoice);
+                    // makeMove calls createBoard, so selection state is visually handled.
+                    // No need to call resetSelectionState() again explicitly unless makeMove fails and state needs revert.
                     if (success && gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
                         const delay = aiDelayEnabled ? AI_DELAY_TIME : 50;
                         setTimeout(requestAiMove, delay);
@@ -1663,8 +1691,14 @@ function handleSquareClick(event) {
                 });
             } else {
                 // --- Normal Valid Move (Not Promotion) ---
+                // selectedSquareAlg is still set to fromAlg here.
+                // resetSelectionState will be called *after* makeMove,
+                // because makeMove itself redraws the board which handles visibility.
                 const success = makeMove(fromAlg, clickedAlg);
-                resetSelectionState(); // Clean up after the move is made (makeMove redraws board)
+                // Whether move succeeded or failed, the selection is now "over".
+                // pickedUpPieceElement should be removed, original piece visibility handled by createBoard in makeMove.
+                resetSelectionState(fromAlg);
+
                 if (success && gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
                     const delay = aiDelayEnabled ? AI_DELAY_TIME : 50;
                     setTimeout(requestAiMove, delay);
@@ -1673,35 +1707,33 @@ function handleSquareClick(event) {
         } else {
             // --- Clicked an Invalid Destination Square ---
             playSound('illegal');
-            resetSelectionState(); // Put the piece back where it was
+            const previousSelectedAlg = fromAlg; // Store before resetting
+            resetSelectionState(fromAlg); // Put the piece back where it was, clear selection
 
-            // Check if the new clicked square has another of the player's pieces
+            // Now, check if the new clicked square (clickedAlg) has another of the player's pieces
+            // pieceOnSquareData is for the current clickedAlg
             if (pieceOnSquareData && pieceOnSquareData.color === currentTurn) {
-                // If so, immediately pick up this new piece
+                // If so, immediately pick up this new piece (simulate a new click action without recursion)
                 selectedSquareAlg = clickedAlg; // New selection
-                const newOriginalPieceElement = square.querySelector('.piece');
+                const newOriginalPieceElement = square.querySelector('.piece'); // 'square' is the current event's target square
                 if (newOriginalPieceElement) {
                     pickedUpPieceElement = newOriginalPieceElement.cloneNode(true);
                     pickedUpPieceElement.classList.add('picked-up-piece');
 
-                    const boardRect = chessboard.getBoundingClientRect();
                     const scrollX = window.scrollX || document.documentElement.scrollLeft;
                     const scrollY = window.scrollY || document.documentElement.scrollTop;
-                    let initialX = event.clientX + scrollX;
-                    let initialY = event.clientY + scrollY;
-                    if (pickedUpPieceElement.offsetParent === chessboard) {
-                       initialX -= boardRect.left + scrollX;
-                       initialY -= boardRect.top + scrollY;
-                    }
-                    pickedUpPieceElement.style.left = `${initialX - newOriginalPieceElement.offsetWidth / 2}px`;
-                    pickedUpPieceElement.style.top = `${initialY - newOriginalPieceElement.offsetHeight / 2}px`;
+                    let initialX = event.clientX + scrollX - (pickedUpPieceElement.offsetWidth / 2);
+                    let initialY = event.clientY + scrollY - (pickedUpPieceElement.offsetHeight / 2);
+
+                    pickedUpPieceElement.style.left = `${initialX}px`;
+                    pickedUpPieceElement.style.top = `${initialY}px`;
                     document.body.appendChild(pickedUpPieceElement);
                     newOriginalPieceElement.style.visibility = 'hidden';
                     document.addEventListener('mousemove', updatePickedUpPiecePosition);
 
                     const moves = game.moves({ square: clickedAlg, verbose: true });
                     highlightMoves(moves);
-                    square.classList.add('selected'); // Highlight new selected square
+                    square.classList.add('selected');
                 }
             }
         }
@@ -1873,193 +1905,216 @@ function updateGameStatus(statusText) {
 }
 
 // --- Drag & Drop Logic ---
-let draggedPiece = null;
-let draggedSquare = null;
-let originalSquareCoords = null;
+let draggedPiece = null; // Legacy variable, may not be needed if fully transitioned to pickedUpPieceElement
+let draggedSquare = null; // Stores the source square DOM element during a drag
+let originalSquareCoords = null; // Keep this for D&D, might be useful for original position if needed.
 
-/*
 function enableDragAndDrop() {
     if (!chessboard) return;
     
-    // chessboard.addEventListener('mousedown', startDrag);
-    // document.addEventListener('mousemove', handleDrag);
-    // document.addEventListener('mouseup', endDrag);
+    chessboard.addEventListener('mousedown', startDrag);
+    document.addEventListener('mousemove', handleDrag);
+    document.addEventListener('mouseup', endDrag);
     
-    // // Touch support
-    // chessboard.addEventListener('touchstart', handleTouchStart, { passive: false });
-    // document.addEventListener('touchmove', handleTouchMove, { passive: false });
-    // document.addEventListener('touchend', handleTouchEnd);
+    // Touch support
+    chessboard.addEventListener('touchstart', handleTouchStart, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
 }
-*/
 
-/*
 function startDrag(e) {
-    if (isGameOver || isStockfishThinking || isReviewing || promotionCallback) return;
+    // Prevent D&D if a piece is already selected by click-to-move, or if game conditions prevent moves.
+    if (pickedUpPieceElement || isGameOver || isStockfishThinking || isReviewing || promotionCallback) return;
     
-    const square = e.target.closest('.square');
-    if (!square) return;
+    const squareElement = e.target.closest('.square');
+    if (!squareElement) return;
     
-    const pieceEl = square.querySelector('.piece');
+    const pieceEl = squareElement.querySelector('.piece'); // The actual DOM element of the piece image/text
     if (!pieceEl) return;
     
-    const coord = square.dataset.coord?.split(',');
+    // Get algebraic notation for the square
+    const coord = squareElement.dataset.coord?.split(',');
     if (!coord) return;
-    
     const row = parseInt(coord[0]);
     const col = parseInt(coord[1]);
     const alg = coordToAlg(row, col);
-    const piece = game.get(alg);
     
-    // Check if it's a valid piece to drag
+    const pieceData = game.get(alg); // Piece data from chess.js {type, color}
+
     const currentTurn = game.turn();
-    const isHumanTurn = (gameMode === 'human' || (gameMode === 'ai' && (currentTurn === 'w' || currentTurn === 'b')));
-    if (!isHumanTurn || !piece || piece.color !== currentTurn) return;
+    const isPlayerAllowedToDrag = (gameMode === 'human' || (gameMode === 'ai' && currentTurn === 'w'));
+
+    if (!isPlayerAllowedToDrag || !pieceData || pieceData.color !== currentTurn) return;
 
     e.preventDefault();
-    draggedPiece = pieceEl.cloneNode(true);
-    draggedSquare = square;
-    originalSquareCoords = { x: square.offsetLeft, y: square.offsetTop };
-    
-    // Style the dragged piece
-    draggedPiece.classList.add('dragged-piece');
-    document.body.appendChild(draggedPiece);
-    
-    // Add pulse animation to original piece
-    pieceEl.classList.add('pulse-animation');
-    
-    // Position the dragged piece at cursor
-    const boardRect = chessboard.getBoundingClientRect();
-    const x = e.clientX - boardRect.left;
-    const y = e.clientY - boardRect.top;
-    // updateDraggedPiecePosition(x, y); // Old D&D
-    
-    // Show legal moves
+
     selectedSquareAlg = alg;
+    
+    pickedUpPieceElement = pieceEl.cloneNode(true);
+    pickedUpPieceElement.classList.add('picked-up-piece');
+    document.body.appendChild(pickedUpPieceElement);
+    
+    pieceEl.style.visibility = 'hidden';
+
+    updatePickedUpPiecePosition(e);
+    
+    isDraggingViaMouseDown = true;
+    draggedSquare = squareElement; // Store the source square element for endDrag cleanup.
+
     const legalMoves = game.moves({ square: alg, verbose: true });
     highlightMoves(legalMoves);
+    squareElement.classList.add('selected');
 }
 
 function handleDrag(e) {
-    // if (!draggedPiece) return; // Old D&D
-    // e.preventDefault();
-    
-    // const boardRect = chessboard.getBoundingClientRect();
-    // const x = e.clientX - boardRect.left;
-    // const y = e.clientY - boardRect.top;
-    // updateDraggedPiecePosition(x, y); // Old D&D
+    if (!isDraggingViaMouseDown || !pickedUpPieceElement) return;
+    e.preventDefault();
+    updatePickedUpPiecePosition(e);
 }
 
 function handleTouchStart(e) {
-    // if (e.touches.length !== 1) return; // Old D&D
-    // const touch = e.touches[0];
-    // const mouseEvent = new MouseEvent('mousedown', {
-    // clientX: touch.clientX,
-    // clientY: touch.clientY
-    // });
-    // startDrag(mouseEvent); // Old D&D
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    // Create a new MouseEvent for 'mousedown'
+    const simulatedMouseEvent = new MouseEvent('mousedown', {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        bubbles: true,
+        cancelable: true
+    });
+    // Dispatch the event from the touch target to allow event delegation (e.g. e.target.closest in startDrag)
+    let eventTarget = touch.target;
+    if (eventTarget.classList.contains('piece')) { // If touch is on piece, dispatch from parent square
+        eventTarget = eventTarget.closest('.square') || chessboard;
+    }
+    if (eventTarget) {
+        eventTarget.dispatchEvent(simulatedMouseEvent);
+    }
 }
 
 function handleTouchMove(e) {
-    // if (!draggedPiece || e.touches.length !== 1) return; // Old D&D
-    // e.preventDefault();
-    // const touch = e.touches[0];
-    // const mouseEvent = new MouseEvent('mousemove', {
-    // clientX: touch.clientX,
-    // clientY: touch.clientY
-    // });
-    // handleDrag(mouseEvent); // Old D&D
+    if (!isDraggingViaMouseDown || e.touches.length !== 1 || !pickedUpPieceElement) return;
+    e.preventDefault();
+
+    const touch = e.touches[0];
+    const simulatedMouseEvent = new MouseEvent('mousemove', {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        bubbles: true,
+        cancelable: true
+    });
+    document.dispatchEvent(simulatedMouseEvent);
 }
 
 function handleTouchEnd(e) {
-    // const touch = e.changedTouches[0]; // Old D&D
-    // const mouseEvent = new MouseEvent('mouseup', {
-    // clientX: touch.clientX,
-    // clientY: touch.clientY
-    // });
-    // endDrag(mouseEvent); // Old D&D
-}
+    if (!isDraggingViaMouseDown || !pickedUpPieceElement) {
+         if(isDraggingViaMouseDown) isDraggingViaMouseDown = false;
+        return;
+    }
 
-function updateDraggedPiecePosition(x, y) {
-    // if (!draggedPiece) return; // Old D&D
-    // const squareSize = chessboard.offsetWidth / 8;
-    // draggedPiece.style.width = `${squareSize}px`;
-    // draggedPiece.style.height = `${squareSize}px`;
-    // draggedPiece.style.left = `${x - squareSize / 2}px`;
-    // draggedPiece.style.top = `${y - squareSize / 2}px`;
+    const touch = e.changedTouches[0];
+    const simulatedMouseEvent = new MouseEvent('mouseup', {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        bubbles: true,
+        cancelable: true
+    });
+    document.dispatchEvent(simulatedMouseEvent);
 }
 
 function endDrag(e) {
-    // if (!draggedPiece || !draggedSquare) return; // Old D&D
+    if (!isDraggingViaMouseDown || !pickedUpPieceElement) {
+        // This case should ideally not be reached if isDraggingViaMouseDown is managed correctly.
+        // But as a safeguard:
+        if (pickedUpPieceElement) pickedUpPieceElement.remove();
+        pickedUpPieceElement = null;
+        isDraggingViaMouseDown = false;
+        return;
+    }
+
+    const fromAlg = selectedSquareAlg;
+    let moveMadeSuccessfully = false;
+    let isPromotionAttempt = false;
+
+    const boardRect = chessboard.getBoundingClientRect();
+    const x = e.clientX - boardRect.left;
+    const y = e.clientY - boardRect.top;
+
+    const squareSize = chessboard.offsetWidth / 8;
+    const targetCol = Math.floor(x / squareSize);
+    const targetRow = Math.floor(y / squareSize);
     
-    // const boardRect = chessboard.getBoundingClientRect();
-    // const x = e.clientX - boardRect.left;
-    // const y = e.clientY - boardRect.top;
-    // const squareSize = boardRect.width / 8;
+    if (targetRow >= 0 && targetRow < 8 && targetCol >= 0 && targetCol < 8) {
+        const toAlg = coordToAlg(targetRow, targetCol);
+        const piece = game.get(fromAlg);
+
+        if (fromAlg && toAlg && piece && fromAlg !== toAlg) {
+            isPromotionAttempt = piece.type === 'p' &&
+                               ((piece.color === 'w' && targetRow === 0) ||
+                                (piece.color === 'b' && targetRow === 7));
+
+            if (isPromotionAttempt) {
+                // Promotion modal handles its own cleanup of pickedUpPieceElement, highlights, etc.
+                // after the user makes a choice or cancels.
+                showPromotionModal(piece.color === 'w' ? 'white' : 'black', (promoChoice) => {
+                    if (promoChoice) {
+                        moveMadeSuccessfully = makeMove(fromAlg, toAlg, promoChoice);
+                    } else { // Promotion cancelled
+                         if (draggedSquare) draggedSquare.classList.remove('selected');
+                         const originalPieceEl = draggedSquare ? draggedSquare.querySelector('.piece') : null;
+                         if(originalPieceEl) originalPieceEl.style.visibility = 'visible';
+                         createBoard(); // Redraw to restore piece
+                    }
+                    // Common cleanup for promotion path
+                    if (pickedUpPieceElement) pickedUpPieceElement.remove();
+                    pickedUpPieceElement = null;
+                    highlightMoves([]);
+                    selectedSquareAlg = null;
+                    // isDraggingViaMouseDown is set at the end of the outer function
+                });
+            } else { // Not a promotion
+                const legalMoves = game.moves({ square: fromAlg, verbose: true });
+                if (legalMoves.some(m => m.to === toAlg)) {
+                    moveMadeSuccessfully = makeMove(fromAlg, toAlg);
+                } else {
+                    playSound('illegal');
+                }
+            }
+        }
+    }
     
-    // const targetCol = Math.floor(x / squareSize);
-    // const targetRow = Math.floor(y / squareSize);
-    
-    // draggedPiece.remove();
-    // draggedPiece = null;
-    // const originalPiece = draggedSquare.querySelector('.piece');
-    // if (originalPiece) originalPiece.classList.remove('pulse-animation');
-    
-    // highlightMoves([]);
-    
-    // if (targetRow >= 0 && targetRow < 8 && targetCol >= 0 && targetCol < 8) {
-        // const fromAlg = selectedSquareAlg;
-        // const toAlg = coordToAlg(targetRow, targetCol);
-        
-        // const piece = game.get(fromAlg);
-        // const isPromotion = piece &&
-                           // piece.type === 'p' &&
-                           // ((piece.color === 'w' && targetRow === 0) ||
-                            // (piece.color === 'b' && targetRow === 7));
-        
-        // if (isPromotion) {
-            // showPromotionModal(piece.color === 'w' ? 'white' : 'black', (promoChoice) => {
-                // if (promoChoice) {
-                    // makeMove(fromAlg, toAlg, promoChoice);
-                    // if (gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
-                        // setTimeout(requestAiMove, aiDelayEnabled ? AI_DELAY_TIME : 50);
-                    // }
-                // }
-            // });
-        // } else {
-            // const success = makeMove(fromAlg, toAlg);
-            // if (success && gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
-                // setTimeout(requestAiMove, aiDelayEnabled ? AI_DELAY_TIME : 50);
-            // }
-        // }
-    // }
-    
-    // selectedSquareAlg = null;
-    // draggedSquare = null;
+    // General cleanup if not a promotion move (promotion handles its own UI reset in callback)
+    if (!isPromotionAttempt) {
+        if (pickedUpPieceElement) pickedUpPieceElement.remove();
+        pickedUpPieceElement = null;
+        highlightMoves([]);
+        if (draggedSquare) draggedSquare.classList.remove('selected');
+
+        if (!moveMadeSuccessfully) {
+            // If dropped off-board or illegal non-promo move, restore original piece.
+            // makeMove itself calls createBoard on success, which handles visibility.
+            // So, only call createBoard here if a move wasn't made or wasn't successful.
+            const originalPieceElOnBoard = draggedSquare ? draggedSquare.querySelector('.piece') : null;
+            if(originalPieceElOnBoard) originalPieceElOnBoard.style.visibility = 'visible';
+            createBoard(); // Redraw to restore original piece to its source square
+        }
+    }
+
+    selectedSquareAlg = null;
+    if (draggedSquare) {
+       draggedSquare.classList.remove('selected');
+    }
+    draggedSquare = null;
+    isDraggingViaMouseDown = false;
 }
-*/
+
 // Initialize drag and drop when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    // enableDragAndDrop(); // Click-to-move is replacing drag and drop
+    enableDragAndDrop();
 });
 
 // --- New Mouse Follow Function ---
-function updatePickedUpPiecePosition(event) {
-    if (!pickedUpPieceElement) return;
-    // Ensure chessboard and its offsetParent are available for correct positioning
-    if (!chessboard || !chessboard.offsetParent) return;
-
-    const boardRect = chessboard.getBoundingClientRect();
-
-    // Position relative to the viewport, then account for scroll, as pickedUpPieceElement is child of document.body
-    const scrollX = window.scrollX || document.documentElement.scrollLeft;
-    const scrollY = window.scrollY || document.documentElement.scrollTop;
-    let x = event.clientX + scrollX;
-    let y = event.clientY + scrollY;
-
-    // Center the piece on the cursor.
-    pickedUpPieceElement.style.left = `${x - pickedUpPieceElement.offsetWidth / 2}px`;
-    pickedUpPieceElement.style.top = `${y - pickedUpPieceElement.offsetHeight / 2}px`;
-}
+// [Function moved to a more appropriate location earlier in the file]
 
 function updateCapturedPieces() {
     // capturedWhite has uppercase ('P', 'N') - white pieces captured by Black
@@ -2764,3 +2819,5 @@ function highlightHintSquare(alg, className) {
 }
 console.log("scripts-v3.js (with PUZZLE integration) loaded.");
 // --- END OF MODIFIED PUZZLE SECTION ---
+
+[end of scripts.js]
