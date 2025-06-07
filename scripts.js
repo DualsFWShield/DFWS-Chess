@@ -48,6 +48,7 @@ let capturedBlack = []; // Store piece chars ('p', 'n', etc.) captured BY WHITE
 let promotionCallback = null; // Stores the callback for promotion choice
 let isReviewing = false; // Flag for game review state
 let autoFlipEnabled = true; // Default to auto-flipping in H vs H mode
+let pickedUpPieceElement = null; // Stores the visual element of the piece being moved
 
 // --- Statistics & Ratings ---
 let gamesPlayed = 0, wins = 0, losses = 0, draws = 0;
@@ -1559,87 +1560,151 @@ function handleSquareClick(event) {
     if (isGameOver || isStockfishThinking || isReviewing || promotionCallback) return;
 
     const currentTurn = game.turn(); // Use main game instance
-    const isHumanTurn = (gameMode === 'human' || (gameMode === 'ai' && currentTurn === 'w'));
+    const pieceOnSquareData = game.get(clickedAlg); // chess.js piece data {type, color}
 
-    if (!isHumanTurn) return;
+    // Determine if the current player can interact based on game mode and turn
+    const isPlayerAllowedToMove = (gameMode === 'human' || (gameMode === 'ai' && currentTurn === 'w'));
+    if (!isPlayerAllowedToMove) return;
 
-     const pieceOnSquare = game.get(clickedAlg); // Use main game instance
-
-     if (selectedSquareAlg) {
-        // --- Piece Already Selected --- (Main Game)
-        const fromAlg = selectedSquareAlg;
-        const fromCoord = algToCoord(fromAlg); // Get coords for querySelector
-
-        // Case 1: Clicked the same square again - Deselect
-        if (clickedAlg === fromAlg) {
-            square.classList.remove('selected');
-            selectedSquareAlg = null;
-            highlightMoves([]);
+    if (!selectedSquareAlg) {
+        // --- No piece selected: Try to pick up a piece ---
+        if (pieceOnSquareData && pieceOnSquareData.color === currentTurn) {
             playSound('click');
+            selectedSquareAlg = clickedAlg; // Store algebraic notation of selected square
+
+            const originalPieceElement = square.querySelector('.piece'); // The img/span element
+            if (originalPieceElement) {
+                // Clone the piece for dragging
+                pickedUpPieceElement = originalPieceElement.cloneNode(true);
+                pickedUpPieceElement.classList.add('picked-up-piece'); // For CSS styling (z-index, size, position:absolute)
+
+                // Position initially at the click relative to the board for smooth pickup
+                const boardRect = chessboard.getBoundingClientRect(); // Used for reference, but piece is child of body
+                const scrollX = window.scrollX || document.documentElement.scrollLeft;
+                const scrollY = window.scrollY || document.documentElement.scrollTop;
+
+                // Since pickedUpPieceElement is appended to document.body, its position should be viewport-relative + scroll.
+                // event.clientX/Y is already viewport-relative.
+                let initialX = event.clientX + scrollX;
+                let initialY = event.clientY + scrollY;
+
+                pickedUpPieceElement.style.left = `${initialX - originalPieceElement.offsetWidth / 2}px`;
+                pickedUpPieceElement.style.top = `${initialY - originalPieceElement.offsetHeight / 2}px`;
+
+                document.body.appendChild(pickedUpPieceElement);
+
+                originalPieceElement.style.visibility = 'hidden'; // Hide the original piece
+
+                document.addEventListener('mousemove', updatePickedUpPiecePosition);
+
+                const moves = game.moves({ square: clickedAlg, verbose: true });
+                highlightMoves(moves);
+                square.classList.add('selected'); // Visual feedback for original square
+            }
+        }
+    } else {
+        // --- Piece already selected: Try to place it or deselect ---
+        const fromAlg = selectedSquareAlg;
+        // Find the DOM element for the square where the piece was originally picked up from
+        const fromCoord = algToCoord(fromAlg);
+        const originalSquareDomElement = fromCoord ? chessboard.querySelector(`.square[data-row="${fromCoord[0]}"][data-col="${fromCoord[1]}"]`) : null;
+        const originalPieceDomElement = originalSquareDomElement ? originalSquareDomElement.querySelector('.piece') : null;
+
+        const resetSelectionState = () => {
+            if (originalPieceDomElement) {
+                originalPieceDomElement.style.visibility = 'visible'; // Make original piece visible again
+            }
+            if (pickedUpPieceElement && pickedUpPieceElement.parentNode) {
+                pickedUpPieceElement.parentNode.removeChild(pickedUpPieceElement);
+            }
+            pickedUpPieceElement = null;
+            if (originalSquareDomElement) {
+                originalSquareDomElement.classList.remove('selected');
+            }
+            // Also remove 'selected' class from the target square if it was added
+            square.classList.remove('selected');
+
+            selectedSquareAlg = null;
+            highlightMoves([]); // Clear all move highlights
+            document.removeEventListener('mousemove', updatePickedUpPiecePosition);
+        };
+
+        if (clickedAlg === fromAlg) { // Clicked the same square
+            resetSelectionState();
+            playSound('click'); // Sound for deselecting
             return;
         }
 
-         // Case 2: Clicked a potential destination square (Main Game)
         const legalMovesForPiece = game.moves({ square: fromAlg, verbose: true });
         const targetMove = legalMovesForPiece.find(move => move.to === clickedAlg);
 
-         if (targetMove) {
-            // --- Valid Move Target --- (Main Game)
-            if (fromCoord) {
-                const fromSquareEl = chessboard.querySelector(`.square[data-row="${fromCoord[0]}"][data-col="${fromCoord[1]}"]`);
-                if(fromSquareEl) fromSquareEl.classList.remove('selected');
-            }
-            highlightMoves([]);
+        if (targetMove) {
+            // --- Valid Move Target ---
+            if (targetMove.flags.includes('p')) { // Promotion
+                // Store necessary info before reset, as modal is async
+                const currentPromotionFrom = fromAlg;
+                const currentPromotionTo = clickedAlg;
+                const currentTurnForPromotion = currentTurn;
 
-             if (targetMove.flags.includes('p')) {
-                // --- Promotion Move --- (Main Game)
-                showPromotionModal(currentTurn === 'w' ? 'white' : 'black', (promoChoice) => {
-                    if (!promoChoice) { console.log("Promotion cancelled."); selectedSquareAlg = null; return; }
-                    const success = makeMove(fromAlg, clickedAlg, promoChoice);
+                resetSelectionState(); // Reset visual state before showing modal
+
+                showPromotionModal(currentTurnForPromotion === 'w' ? 'white' : 'black', (promoChoice) => {
+                    if (!promoChoice) {
+                        console.log("Promotion cancelled.");
+                        // Piece is already visually back on its square due to resetSelectionState.
+                        // No further action needed beyond what resetSelectionState did.
+                        return;
+                    }
+                    const success = makeMove(currentPromotionFrom, currentPromotionTo, promoChoice);
                     if (success && gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
                         const delay = aiDelayEnabled ? AI_DELAY_TIME : 50;
                         setTimeout(requestAiMove, delay);
                     }
                 });
-                selectedSquareAlg = null; // Deselect logically while modal is up
-                return;
             } else {
-                // --- Normal Move (Not Promotion) --- (Main Game)
-                selectedSquareAlg = null;
+                // --- Normal Valid Move (Not Promotion) ---
                 const success = makeMove(fromAlg, clickedAlg);
+                resetSelectionState(); // Clean up after the move is made (makeMove redraws board)
                 if (success && gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
                     const delay = aiDelayEnabled ? AI_DELAY_TIME : 50;
                     setTimeout(requestAiMove, delay);
                 }
             }
         } else {
-            // Case 3: Clicked an invalid destination or another own piece (Main Game)
-            if (fromCoord) {
-                const oldSquareEl = chessboard.querySelector(`.square[data-row="${fromCoord[0]}"][data-col="${fromCoord[1]}"]`);
-                if(oldSquareEl) oldSquareEl.classList.remove('selected');
-            }
+            // --- Clicked an Invalid Destination Square ---
+            playSound('illegal');
+            resetSelectionState(); // Put the piece back where it was
 
-            if (pieceOnSquare && pieceOnSquare.color === currentTurn) {
-                // Clicked another piece - switch selection
-                selectedSquareAlg = clickedAlg;
-                square.classList.add('selected');
-                const newMoves = game.moves({ square: clickedAlg, verbose: true });
-                highlightMoves(newMoves);
-                playSound('click');
-            } else {
-                // Clicked invalid target - deselect
-                playSound('illegal');
-                selectedSquareAlg = null;
-                highlightMoves([]);
+            // Check if the new clicked square has another of the player's pieces
+            if (pieceOnSquareData && pieceOnSquareData.color === currentTurn) {
+                // If so, immediately pick up this new piece
+                selectedSquareAlg = clickedAlg; // New selection
+                const newOriginalPieceElement = square.querySelector('.piece');
+                if (newOriginalPieceElement) {
+                    pickedUpPieceElement = newOriginalPieceElement.cloneNode(true);
+                    pickedUpPieceElement.classList.add('picked-up-piece');
+
+                    const boardRect = chessboard.getBoundingClientRect();
+                    const scrollX = window.scrollX || document.documentElement.scrollLeft;
+                    const scrollY = window.scrollY || document.documentElement.scrollTop;
+                    let initialX = event.clientX + scrollX;
+                    let initialY = event.clientY + scrollY;
+                    if (pickedUpPieceElement.offsetParent === chessboard) {
+                       initialX -= boardRect.left + scrollX;
+                       initialY -= boardRect.top + scrollY;
+                    }
+                    pickedUpPieceElement.style.left = `${initialX - newOriginalPieceElement.offsetWidth / 2}px`;
+                    pickedUpPieceElement.style.top = `${initialY - newOriginalPieceElement.offsetHeight / 2}px`;
+                    document.body.appendChild(pickedUpPieceElement);
+                    newOriginalPieceElement.style.visibility = 'hidden';
+                    document.addEventListener('mousemove', updatePickedUpPiecePosition);
+
+                    const moves = game.moves({ square: clickedAlg, verbose: true });
+                    highlightMoves(moves);
+                    square.classList.add('selected'); // Highlight new selected square
+                }
             }
         }
-    } else if (pieceOnSquare && pieceOnSquare.color === currentTurn) {
-        // --- No Piece Selected, Clicked Own Piece --- Select it (Main Game)
-        playSound('click');
-        selectedSquareAlg = clickedAlg;
-        square.classList.add('selected');
-        const moves = game.moves({ square: clickedAlg, verbose: true });
-        highlightMoves(moves);
     }
 }
 
@@ -1812,19 +1877,22 @@ let draggedPiece = null;
 let draggedSquare = null;
 let originalSquareCoords = null;
 
+/*
 function enableDragAndDrop() {
     if (!chessboard) return;
     
-    chessboard.addEventListener('mousedown', startDrag);
-    document.addEventListener('mousemove', handleDrag);
-    document.addEventListener('mouseup', endDrag);
+    // chessboard.addEventListener('mousedown', startDrag);
+    // document.addEventListener('mousemove', handleDrag);
+    // document.addEventListener('mouseup', endDrag);
     
-    // Touch support
-    chessboard.addEventListener('touchstart', handleTouchStart, { passive: false });
-    document.addEventListener('touchmove', handleTouchMove, { passive: false });
-    document.addEventListener('touchend', handleTouchEnd);
+    // // Touch support
+    // chessboard.addEventListener('touchstart', handleTouchStart, { passive: false });
+    // document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    // document.addEventListener('touchend', handleTouchEnd);
 }
+*/
 
+/*
 function startDrag(e) {
     if (isGameOver || isStockfishThinking || isReviewing || promotionCallback) return;
     
@@ -1863,7 +1931,7 @@ function startDrag(e) {
     const boardRect = chessboard.getBoundingClientRect();
     const x = e.clientX - boardRect.left;
     const y = e.clientY - boardRect.top;
-    updateDraggedPiecePosition(x, y);
+    // updateDraggedPiecePosition(x, y); // Old D&D
     
     // Show legal moves
     selectedSquareAlg = alg;
@@ -1872,112 +1940,127 @@ function startDrag(e) {
 }
 
 function handleDrag(e) {
-    if (!draggedPiece) return;
-    e.preventDefault();
+    // if (!draggedPiece) return; // Old D&D
+    // e.preventDefault();
     
-    const boardRect = chessboard.getBoundingClientRect();
-    const x = e.clientX - boardRect.left;
-    const y = e.clientY - boardRect.top;
-    updateDraggedPiecePosition(x, y);
+    // const boardRect = chessboard.getBoundingClientRect();
+    // const x = e.clientX - boardRect.left;
+    // const y = e.clientY - boardRect.top;
+    // updateDraggedPiecePosition(x, y); // Old D&D
 }
 
 function handleTouchStart(e) {
-    if (e.touches.length !== 1) return;
-    const touch = e.touches[0];
-    const mouseEvent = new MouseEvent('mousedown', {
-        clientX: touch.clientX,
-        clientY: touch.clientY
-    });
-    startDrag(mouseEvent);
+    // if (e.touches.length !== 1) return; // Old D&D
+    // const touch = e.touches[0];
+    // const mouseEvent = new MouseEvent('mousedown', {
+    // clientX: touch.clientX,
+    // clientY: touch.clientY
+    // });
+    // startDrag(mouseEvent); // Old D&D
 }
 
 function handleTouchMove(e) {
-    if (!draggedPiece || e.touches.length !== 1) return;
-    e.preventDefault();
-    const touch = e.touches[0];
-    const mouseEvent = new MouseEvent('mousemove', {
-        clientX: touch.clientX,
-        clientY: touch.clientY
-    });
-    handleDrag(mouseEvent);
+    // if (!draggedPiece || e.touches.length !== 1) return; // Old D&D
+    // e.preventDefault();
+    // const touch = e.touches[0];
+    // const mouseEvent = new MouseEvent('mousemove', {
+    // clientX: touch.clientX,
+    // clientY: touch.clientY
+    // });
+    // handleDrag(mouseEvent); // Old D&D
 }
 
 function handleTouchEnd(e) {
-    const touch = e.changedTouches[0];
-    const mouseEvent = new MouseEvent('mouseup', {
-        clientX: touch.clientX,
-        clientY: touch.clientY
-    });
-    endDrag(mouseEvent);
+    // const touch = e.changedTouches[0]; // Old D&D
+    // const mouseEvent = new MouseEvent('mouseup', {
+    // clientX: touch.clientX,
+    // clientY: touch.clientY
+    // });
+    // endDrag(mouseEvent); // Old D&D
 }
 
 function updateDraggedPiecePosition(x, y) {
-    if (!draggedPiece) return;
-    const squareSize = chessboard.offsetWidth / 8;
-    draggedPiece.style.width = `${squareSize}px`; // Ensure proper scaling
-    draggedPiece.style.height = `${squareSize}px`; // Ensure proper scaling
-    draggedPiece.style.left = `${x - squareSize / 2}px`;
-    draggedPiece.style.top = `${y - squareSize / 2}px`;
+    // if (!draggedPiece) return; // Old D&D
+    // const squareSize = chessboard.offsetWidth / 8;
+    // draggedPiece.style.width = `${squareSize}px`;
+    // draggedPiece.style.height = `${squareSize}px`;
+    // draggedPiece.style.left = `${x - squareSize / 2}px`;
+    // draggedPiece.style.top = `${y - squareSize / 2}px`;
 }
 
 function endDrag(e) {
-    if (!draggedPiece || !draggedSquare) return;
+    // if (!draggedPiece || !draggedSquare) return; // Old D&D
     
-    const boardRect = chessboard.getBoundingClientRect();
-    const x = e.clientX - boardRect.left;
-    const y = e.clientY - boardRect.top;
-    const squareSize = boardRect.width / 8;
+    // const boardRect = chessboard.getBoundingClientRect();
+    // const x = e.clientX - boardRect.left;
+    // const y = e.clientY - boardRect.top;
+    // const squareSize = boardRect.width / 8;
     
-    // Calculate target square
-    const targetCol = Math.floor(x / squareSize);
-    const targetRow = Math.floor(y / squareSize);
+    // const targetCol = Math.floor(x / squareSize);
+    // const targetRow = Math.floor(y / squareSize);
     
-    // Remove drag elements and animations
-    draggedPiece.remove();
-    draggedPiece = null;
-    const originalPiece = draggedSquare.querySelector('.piece');
-    if (originalPiece) originalPiece.classList.remove('pulse-animation');
+    // draggedPiece.remove();
+    // draggedPiece = null;
+    // const originalPiece = draggedSquare.querySelector('.piece');
+    // if (originalPiece) originalPiece.classList.remove('pulse-animation');
     
-    // Clear highlights
-    highlightMoves([]);
+    // highlightMoves([]);
     
-    // Validate and make move if legal
-    if (targetRow >= 0 && targetRow < 8 && targetCol >= 0 && targetCol < 8) {
-        const fromAlg = selectedSquareAlg;
-        const toAlg = coordToAlg(targetRow, targetCol);
+    // if (targetRow >= 0 && targetRow < 8 && targetCol >= 0 && targetCol < 8) {
+        // const fromAlg = selectedSquareAlg;
+        // const toAlg = coordToAlg(targetRow, targetCol);
         
-        // Check if move would be a promotion
-        const piece = game.get(fromAlg);
-        const isPromotion = piece && 
-                           piece.type === 'p' && 
-                           ((piece.color === 'w' && targetRow === 0) || 
-                            (piece.color === 'b' && targetRow === 7));
+        // const piece = game.get(fromAlg);
+        // const isPromotion = piece &&
+                           // piece.type === 'p' &&
+                           // ((piece.color === 'w' && targetRow === 0) ||
+                            // (piece.color === 'b' && targetRow === 7));
         
-        if (isPromotion) {
-            showPromotionModal(piece.color === 'w' ? 'white' : 'black', (promoChoice) => {
-                if (promoChoice) {
-                    makeMove(fromAlg, toAlg, promoChoice);
-                    if (gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
-                        setTimeout(requestAiMove, aiDelayEnabled ? AI_DELAY_TIME : 50);
-                    }
-                }
-            });
-        } else {
-            const success = makeMove(fromAlg, toAlg);
-            if (success && gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
-                setTimeout(requestAiMove, aiDelayEnabled ? AI_DELAY_TIME : 50);
-            }
-        }
-    }
+        // if (isPromotion) {
+            // showPromotionModal(piece.color === 'w' ? 'white' : 'black', (promoChoice) => {
+                // if (promoChoice) {
+                    // makeMove(fromAlg, toAlg, promoChoice);
+                    // if (gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
+                        // setTimeout(requestAiMove, aiDelayEnabled ? AI_DELAY_TIME : 50);
+                    // }
+                // }
+            // });
+        // } else {
+            // const success = makeMove(fromAlg, toAlg);
+            // if (success && gameMode === 'ai' && game.turn() === 'b' && !isGameOver) {
+                // setTimeout(requestAiMove, aiDelayEnabled ? AI_DELAY_TIME : 50);
+            // }
+        // }
+    // }
     
-    selectedSquareAlg = null;
-    draggedSquare = null;
+    // selectedSquareAlg = null;
+    // draggedSquare = null;
 }
-
+*/
 // Initialize drag and drop when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    enableDragAndDrop();
+    // enableDragAndDrop(); // Click-to-move is replacing drag and drop
 });
+
+// --- New Mouse Follow Function ---
+function updatePickedUpPiecePosition(event) {
+    if (!pickedUpPieceElement) return;
+    // Ensure chessboard and its offsetParent are available for correct positioning
+    if (!chessboard || !chessboard.offsetParent) return;
+
+    const boardRect = chessboard.getBoundingClientRect();
+
+    // Position relative to the viewport, then account for scroll, as pickedUpPieceElement is child of document.body
+    const scrollX = window.scrollX || document.documentElement.scrollLeft;
+    const scrollY = window.scrollY || document.documentElement.scrollTop;
+    let x = event.clientX + scrollX;
+    let y = event.clientY + scrollY;
+
+    // Center the piece on the cursor.
+    pickedUpPieceElement.style.left = `${x - pickedUpPieceElement.offsetWidth / 2}px`;
+    pickedUpPieceElement.style.top = `${y - pickedUpPieceElement.offsetHeight / 2}px`;
+}
+
 function updateCapturedPieces() {
     // capturedWhite has uppercase ('P', 'N') - white pieces captured by Black
     // capturedBlack has lowercase ('p', 'n') - black pieces captured by White

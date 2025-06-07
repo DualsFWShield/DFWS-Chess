@@ -581,6 +581,18 @@ body.light-theme .difficulty-button.difficulty-learn.selected {
     transition: transform 0.15s ease;
 }
 
+/* Class for the piece being moved with click-to-move */
+.picked-up-piece {
+    position: absolute;
+    z-index: 1000; /* High z-index to float above everything */
+    pointer-events: none; /* Allows click events to pass through to squares underneath */
+    transform: scale(1.2); /* Make it slightly larger */
+    box-shadow: 0px 5px 15px rgba(0,0,0,0.3); /* Add a shadow for depth */
+    /* Ensure image/text inside scales correctly if needed, but transform on the element itself should handle it */
+    /* If it's an img tag, its width/height might need to be explicitly set or handled by parent's display context */
+    /* For ASCII pieces (span), scale works directly. For img, it also works. */
+}
+
 .white-piece {
     color: var(--accent-color);
 }
@@ -607,28 +619,12 @@ body.light-theme .black-piece {
 /* Drag & Drop Styles */
 .piece {
     user-select: none;
-    cursor: grab;
+    cursor: grab; /* Default cursor, will be overridden by square's pointer when not dragging */
     transition: transform 0.1s;
 }
 
-.piece.dragging {
-    cursor: grabbing;
-    transform: scale(1.1);
-    animation: pulse 0.5s infinite;
-    pointer-events: none;
-    z-index: 1000;
-}
+/* Old D&D styles removed: .piece.dragging, .piece-ghost, @keyframes pulse */
 
-.piece-ghost {
-    opacity: 0.5;
-    pointer-events: none;
-}
-
-@keyframes pulse {
-    0% { transform: scale(1.1); }
-    50% { transform: scale(1.15); }
-    100% { transform: scale(1.1); }
-}
 /* Close Button for Modals */
 .modal .close-button {
     background: var(--secondary-color);
